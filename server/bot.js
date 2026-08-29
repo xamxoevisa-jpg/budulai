@@ -4,11 +4,11 @@
 // (dx, dy, sprint, angle) и дергает handleInteract — вся физика
 // и правила остаются общими с живыми игроками.
 //
-// Честность: бот-Монстр НЕ знает позицию жертвы — он идёт по
-// следам, «слышит дыхание» вблизи (как человек по индикатору)
-// и проверяет укрытия там, где след оборвался. Бот-Жертва
-// убегает, когда Монстр близко (её сердцебиение), иначе
-// патрулирует и прячется.
+// Честность: бот играет по тем же правилам, что и человек —
+// видит жертву только вблизи и без стены между ними, слышит
+// дыхание рядом, иначе идёт по следам и проверяет укрытия там,
+// где след оборвался. Бот-Жертва убегает, когда Монстр близко,
+// иначе патрулирует и прячется.
 // ============================================================
 
 'use strict';
@@ -122,6 +122,25 @@ function update(game, dt) {
 function updateHunter(game, bot, foe, st, dt) {
   const dist = Math.hypot(foe.x - bot.x, foe.y - bot.y);
   const hearRange = 260; // как snap.breath у живого Монстра
+
+  // 0) ВИДИТ её — идёт напрямую, без всякой неточности
+  const sees = foe.hiddenIn < 0 && dist < 430 &&
+    game.hasLineOfSight(bot.x, bot.y, foe.x, foe.y);
+  if (sees) {
+    if (st.repath <= 0 || st.goalKind !== 'chase') {
+      setGoal(game, bot, st, [Math.floor(foe.x / TILE), Math.floor(foe.y / TILE)], 'chase');
+      st.repath = 0.35;
+    }
+    if (dist < TILE * 1.6) {
+      const dx = foe.x - bot.x, dy = foe.y - bot.y;
+      const d = Math.hypot(dx, dy) || 1;
+      bot.input.dx = dx / d; bot.input.dy = dy / d;
+      bot.input.angle = Math.atan2(dy, dx);
+      return;
+    }
+    steer(game, bot, st, false);
+    return;
+  }
 
   // 1) слышит дыхание — идёт на звук; неточность прицела тает с дистанцией
   if (foe.hiddenIn < 0 && dist < hearRange) {

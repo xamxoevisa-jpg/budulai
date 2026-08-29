@@ -39,7 +39,7 @@ class Client {
     this.ws.on('message', (raw) => {
       const m = JSON.parse(raw);
       this.inbox.push(m);
-      if (m.type === 'snap') this.snap = m;
+      if (m.type === 'snap') { this.snap = m; if (m.foe) this.sawFoe = true; }
       if (m.type === 'roundStart') { this.roundStart = m; this.snap = null; }
       if (m.type === 'footprint') this.footprints++;
       if (m.type === 'hide') this.gotHide = m;
@@ -153,7 +153,7 @@ async function main() {
   await survivor.wait(c => c.snap, 5000, 'первый снапшот');
   await hunter.wait(c => c.snap, 5000, 'первый снапшот охотника');
   assert(survivor.snap.foe && typeof survivor.snap.foe.x === 'number', 'Выживший видит позицию Монстра');
-  assert(!hunter.snap.foe, 'Монстр НЕ видит позицию Выжившего');
+  assert(!hunter.snap.foe, 'Монстр не видит Выжившего через всю карту');
 
   const sx0 = survivor.snap.you.x;
   survivor.send({ type: 'input', dx: -1, dy: 0, sprint: false, angle: Math.PI });
@@ -167,6 +167,7 @@ async function main() {
   await walkTo(hunter, { x: survivor.snap.you.x, y: survivor.snap.you.y },
     { until: c => c.roundEnds.length >= 1 });
   await hunter.wait(c => c.roundEnds.length >= 1, 8000, 'поимка');
+  assert(hunter.sawFoe, 'Монстр УВИДЕЛ Выжившего вблизи (прямая видимость)');
   const re1 = hunter.roundEnds[0];
   assert(re1.stats.result === 'caught', 'раунд закончился поимкой');
   assert(re1.stats.how === 'chase', 'поимка в погоне');

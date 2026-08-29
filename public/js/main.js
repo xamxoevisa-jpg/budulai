@@ -26,6 +26,7 @@
     timer: 180,
     score: [0, 0],
     heart: 0, breath: 0,
+    seen: 0, wasSeen: 0,   // Монстр держит Жертву в поле зрения
     stamina: 100, staminaMax: 100,
     hidden: false,
     footprintTTL: 5,
@@ -184,6 +185,14 @@
     }
     G.heart = msg.heart || 0;
     G.breath = msg.breath || 0;
+    // «он тебя увидел» — момент обнаружения бьёт по нервам
+    G.seen = msg.seen || 0;
+    if (G.seen && !G.wasSeen && !G.ended) {
+      if (GameAudio.ready) { GameAudio.sting(); GameAudio.growl(); }
+      Render.trigger('glitch');
+      Render.trigger('shake', 7);
+    }
+    G.wasSeen = G.seen;
   });
 
   Network.on('footprint', (msg) => {
@@ -223,6 +232,7 @@
       UI.showRoundEnd(msg.stats, G.mySlot);
     }
     G._gotFirstSnap = false;
+    G.seen = 0; G.wasSeen = 0;
     GameAudio.setHeartbeat(0);
     GameAudio.setBreath(0);
     GameAudio.setDread(0);
@@ -539,7 +549,7 @@
       foe: foeView,
       footprints: fps,
       spotFlash: G.spotFlash,
-      heart: G.heart,
+      heart: G.seen ? Math.max(G.heart, 0.55) : G.heart,
       catchActive: G.catchActive,
     });
   }

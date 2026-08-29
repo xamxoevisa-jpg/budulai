@@ -24,6 +24,8 @@ const CONST = {
   STAMINA_REGEN: 16,         // восстановление в секунду
   STAMINA_REGEN_DELAY: 1.2,  // задержка перед восстановлением, с
   CATCH_RADIUS: 30,          // дистанция поимки, px
+  HUNTER_SIGHT: 430,         // как далеко Монстр видит Жертву глазами, px
+                             // (сквозь стены не видит — проверяется луч)
   // env-переопределения — только для автотестов
   ROUND_TIME: +process.env.CHERN_ROUND_TIME || 180, // длительность раунда, с
   FREEZE_TIME: process.env.CHERN_FREEZE != null ? +process.env.CHERN_FREEZE : 10, // заморозка Монстра, с
@@ -285,6 +287,21 @@ class Game {
     return dx !== 0 ? nx : ny;
   }
 
+  // Есть ли прямая видимость между точками? Шагаем по лучу и смотрим,
+  // не упёрлись ли в стену. Так Монстр «видит глазами», а не сквозь стены.
+  hasLineOfSight(x0, y0, x1, y1) {
+    const dx = x1 - x0, dy = y1 - y0;
+    const dist = Math.hypot(dx, dy);
+    const steps = Math.ceil(dist / (TILE * 0.35));
+    for (let i = 1; i < steps; i++) {
+      const k = i / steps;
+      const tx = Math.floor((x0 + dx * k) / TILE);
+      const ty = Math.floor((y0 + dy * k) / TILE);
+      if (!this.walkable(tx, ty)) return false;
+    }
+    return true;
+  }
+
   walkable(tx, ty) {
     if (!this.map) return false;
     if (tx < 0 || ty < 0 || tx >= this.map.W || ty >= this.map.H) return false;
@@ -485,10 +502,22 @@ class Game {
     };
 
     if (isHunter) {
-      // Монстр НЕ видит Выжившего: только «дыхание» по близости (0..1)
-      // и то лишь когда жертва не в укрытии
+      // Монстр слышит дыхание по близости (0..1), пока жертва не в укрытии
       const hearRange = 260;
       snap.breath = (foe.hiddenIn < 0 && dist < hearRange) ? +(1 - dist / hearRange).toFixed(2) : 0;
+      // ...и ВИДИТ её, если она в пределах тёмного зрения и не за стеной.
+      // Позицию шлём только в этот момент: за углом клиент её не знает —
+      // значит, и читер ничего не выгадает.
+      const visible = foe.hiddenIn < 0 && dist < CONST.HUNTER_SIGHT &&
+        this.hasLineOfSight(p.x, p.y, foe.x, foe.y);
+      if (visible) {
+        snap.foe = {
+          x: Math.round(foe.x * 10) / 10,
+          y: Math.round(foe.y * 10) / 10,
+          a: Math.round(foe.angle * 100) / 100,
+          mov: foe.moving ? 1 : 0,
+        };
+      }
     } else {
       // Выживший видит Монстра (в конусе фонаря — решает клиент при отрисовке)
       snap.foe = {
@@ -500,6 +529,10 @@ class Game {
       // пульс: 0 (далеко) .. 1 (вплотную)
       const heartRange = 460;
       snap.heart = dist < heartRange ? +(1 - dist / heartRange).toFixed(2) : 0;
+      // «он тебя видит» — честная обратная связь: иначе игрок не поймёт,
+      // почему Монстр вдруг побежал прямо на него
+      snap.seen = (p.hiddenIn < 0 && dist < CONST.HUNTER_SIGHT &&
+        this.hasLineOfSight(foe.x, foe.y, p.x, p.y)) ? 1 : 0;
     }
     return snap;
   }

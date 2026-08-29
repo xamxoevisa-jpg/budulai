@@ -1001,6 +1001,121 @@ const Render = (() => {
     });
     SPR.bodybag.wH = 46; SPR.bodybag.wW = 20; SPR.bodybag.ceil = true;
 
+
+    // Жертва — её теперь видит Монстр, когда она в прямой видимости
+    SPR.survivor = spriteCanvas(240, 470, (g, w, h) => {
+      const cx = w / 2;
+      const SK = { dark: '#4a3f38', mid: '#7d6d60', base: '#a3907e', lit: '#c8b49c' };
+      const gown = { dark: '#3d4a44', mid: '#5f7168', base: '#7d9086', lit: '#9db0a4' };
+
+      // ноги
+      for (const side of [-1, 1]) {
+        const lg = g.createLinearGradient(cx + side * 22 - 12, 0, cx + side * 22 + 12, 0);
+        lg.addColorStop(0, SK.dark); lg.addColorStop(0.5, SK.base); lg.addColorStop(1, SK.dark);
+        g.strokeStyle = lg; g.lineWidth = 17; g.lineCap = 'round';
+        g.beginPath();
+        g.moveTo(cx + side * 15, h * 0.66);
+        g.lineTo(cx + side * 20, h * 0.955);
+        g.stroke();
+        g.fillStyle = SK.mid;
+        g.beginPath(); g.ellipse(cx + side * 21, h * 0.965, 12, 6, 0, 0, 7); g.fill();
+      }
+
+      // больничная рубаха: мешковатая, до колен, в пятнах
+      const tg = g.createLinearGradient(cx - 46, 0, cx + 46, 0);
+      tg.addColorStop(0, gown.dark);
+      tg.addColorStop(0.36, gown.base);
+      tg.addColorStop(0.5, gown.lit);
+      tg.addColorStop(0.74, gown.mid);
+      tg.addColorStop(1, gown.dark);
+      g.fillStyle = tg;
+      g.beginPath();
+      g.moveTo(cx - 34, h * 0.30);
+      g.bezierCurveTo(cx - 44, h * 0.42, cx - 42, h * 0.56, cx - 38, h * 0.69);
+      g.lineTo(cx + 38, h * 0.69);
+      g.bezierCurveTo(cx + 42, h * 0.56, cx + 44, h * 0.42, cx + 34, h * 0.30);
+      g.closePath(); g.fill();
+      // складки
+      g.strokeStyle = 'rgba(20,26,24,0.35)'; g.lineWidth = 2.5;
+      for (const fx2 of [-18, -4, 12, 26]) {
+        g.beginPath();
+        g.moveTo(cx + fx2, h * 0.34);
+        g.quadraticCurveTo(cx + fx2 * 1.1, h * 0.5, cx + fx2 * 1.2, h * 0.68);
+        g.stroke();
+      }
+      // грязь и кровь на подоле
+      g.fillStyle = 'rgba(60,14,10,0.4)';
+      g.beginPath(); g.ellipse(cx + 10, h * 0.62, 16, 9, 0.2, 0, 7); g.fill();
+      g.fillStyle = 'rgba(34,28,20,0.35)';
+      g.beginPath(); g.ellipse(cx - 20, h * 0.66, 18, 7, 0, 0, 7); g.fill();
+
+      // руки
+      for (const side of [-1, 1]) {
+        const ag = g.createLinearGradient(cx + side * 40 - 8, 0, cx + side * 40 + 8, 0);
+        ag.addColorStop(0, SK.dark); ag.addColorStop(0.5, SK.base); ag.addColorStop(1, SK.dark);
+        g.strokeStyle = ag; g.lineWidth = 12;
+        g.beginPath();
+        g.moveTo(cx + side * 32, h * 0.325);
+        // правая рука вытянута вперёд с фонарём, левая прижата
+        if (side > 0) { g.quadraticCurveTo(cx + 48, h * 0.42, cx + 40, h * 0.50); }
+        else { g.quadraticCurveTo(cx - 46, h * 0.44, cx - 38, h * 0.56); }
+        g.stroke();
+      }
+      // фонарь в правой руке
+      g.fillStyle = '#23252a';
+      g.save();
+      g.translate(cx + 42, h * 0.51); g.rotate(0.3);
+      g.fillRect(-6, -4, 22, 9);
+      g.fillStyle = '#3a3d44'; g.fillRect(14, -5, 6, 11);
+      g.restore();
+
+      // шея и голова
+      g.fillStyle = SK.mid;
+      g.fillRect(cx - 7, h * 0.265, 14, 22);
+      const hg = g.createRadialGradient(cx - 6, h * 0.24, 3, cx, h * 0.245, 26);
+      hg.addColorStop(0, SK.lit); hg.addColorStop(0.6, SK.base); hg.addColorStop(1, SK.dark);
+      g.fillStyle = hg;
+      g.beginPath(); g.ellipse(cx, h * 0.245, 19, 24, 0, 0, 7); g.fill();
+      // длинные волосы, растрёпанные бегом
+      g.fillStyle = '#2b2118';
+      g.beginPath();
+      g.moveTo(cx - 20, h * 0.235);
+      g.bezierCurveTo(cx - 26, h * 0.20, cx - 12, h * 0.185, cx, h * 0.188);
+      g.bezierCurveTo(cx + 12, h * 0.185, cx + 26, h * 0.20, cx + 20, h * 0.235);
+      g.bezierCurveTo(cx + 24, h * 0.30, cx + 16, h * 0.34, cx + 14, h * 0.35);
+      g.lineTo(cx - 14, h * 0.35);
+      g.bezierCurveTo(cx - 16, h * 0.34, cx - 24, h * 0.30, cx - 20, h * 0.235);
+      g.fill();
+      g.strokeStyle = 'rgba(20,15,10,0.9)'; g.lineWidth = 2;
+      for (let i = 0; i < 6; i++) {
+        const hx2 = cx - 18 + i * 7;
+        g.beginPath();
+        g.moveTo(hx2, h * 0.22);
+        g.quadraticCurveTo(hx2 + (i % 2 ? 8 : -8), h * 0.30, hx2 + (i % 2 ? 5 : -5), h * 0.375);
+        g.stroke();
+      }
+      // объём: свет от камеры
+      g.globalCompositeOperation = 'source-atop';
+      const vol = g.createRadialGradient(cx - 6, h * 0.45, 24, cx, h * 0.5, 120);
+      vol.addColorStop(0, 'rgba(0,0,0,0)');
+      vol.addColorStop(0.7, 'rgba(8,7,6,0.28)');
+      vol.addColorStop(1, 'rgba(4,3,3,0.6)');
+      g.fillStyle = vol;
+      g.fillRect(0, 0, w, h);
+      g.globalCompositeOperation = 'source-over';
+    });
+    SPR.survivor.wH = 46; SPR.survivor.wW = 24;
+
+    // луч её фонаря — выдаёт Жертву даже в темноте
+    SPR.survivorLamp = spriteCanvas(64, 64, (g, w, h) => {
+      const gr = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+      gr.addColorStop(0, 'rgba(255,240,200,0.9)');
+      gr.addColorStop(0.16, 'rgba(255,222,155,0.42)');
+      gr.addColorStop(1, 'rgba(255,200,120,0)');
+      g.fillStyle = gr;
+      g.fillRect(0, 0, w, h);
+    });
+
     // Монстр «Будулай»: кадры ходьбы, судорога, бросок
     SPR.monster0 = makeMonsterSprite('walkA');
     SPR.monster1 = makeMonsterSprite('walkB');
@@ -2126,6 +2241,13 @@ const Render = (() => {
         list.push({ spr: frame2, x: view.foe.x, y: view.foe.y, d2, monster: true });
       }
     }
+    // Жертва — Монстр видит её только когда сервер прислал позицию
+    // (в тёмном зрении и без стены между ними)
+    if (isHunter && view.foe) {
+      const dx = view.foe.x - px, dy = view.foe.y - py;
+      const d2 = dx * dx + dy * dy;
+      list.push({ spr: SPR.survivor, x: view.foe.x, y: view.foe.y, d2, survivor: true });
+    }
     // тень-скример
     if (fx.scareShadow && fx.scareShadow.ttl > 0) {
       const s = fx.scareShadow;
@@ -2174,6 +2296,8 @@ const Render = (() => {
       let alpha = it.alpha != null ? it.alpha : Math.min(1, b * 1.5);
       // Монстр в луче виден отчётливо, вблизи — всегда
       if (it.monster) alpha = Math.min(1, Math.max(alpha, 1.15 - trY / 320));
+      // Жертву, попавшую в поле зрения, Монстр видит ясно
+      if (it.survivor) alpha = Math.min(1, Math.max(alpha, 0.95 - trY / 900));
       if (alpha < 0.02) continue;
 
       // порисуем колонками с проверкой z-буфера
@@ -2213,6 +2337,17 @@ const Render = (() => {
         c.fillRect(screenX - poolW, floorScr - poolW, poolW * 2, poolW * 2);
         c.restore();
         c.restore();
+      }
+      // фонарь Жертвы горит ярко — по нему её и замечают
+      if (it.survivor) {
+        const lw2 = (15 * proj) / trY;
+        c.save();
+        c.globalCompositeOperation = 'lighter';
+        c.globalAlpha = 0.34 + Math.sin(t * 9) * 0.07;
+        c.drawImage(SPR.survivorLamp.c,
+          screenX + wPix * 0.18 - lw2 / 2, y0 + hPix * 0.5 - lw2 / 2, lw2, lw2);
+        c.restore();
+        c.globalAlpha = 1;
       }
       // зрачки Монстра тлеют в глазницах даже вне луча фонаря
       if (it.monster && spr.eye) {
