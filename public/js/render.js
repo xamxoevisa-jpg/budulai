@@ -148,7 +148,7 @@ const Render = (() => {
     frame.width = W * DPR; frame.height = H * DPR;
     tintA.width = tintB.width = W * DPR;
     tintA.height = tintB.height = H * DPR;
-    numRays = Math.min(440, Math.max(160, Math.floor(W / 2)));
+    numRays = Math.min(760, Math.max(220, Math.floor(W)));
     zBuf = new Float32Array(numRays);
     buildVeins();
   }
@@ -1980,6 +1980,8 @@ const Render = (() => {
   // временный холст: спрайт нужно ЗАТЕМНЯТЬ, а не гасить прозрачностью,
   // иначе на фоне освещённой стены он выглядит призраком
   let shadeBuf = null;
+  // буфер свечения: яркое в кадре «растекается» ореолом, как в объективе
+  let bloomA = null, bloomB = null;
   function shadeSprite(spr, k) {
     if (!shadeBuf) shadeBuf = document.createElement('canvas');
     const sw = spr.c.width, sh = spr.c.height;
@@ -2184,19 +2186,21 @@ const Render = (() => {
 
       const x = i * colW;
       c.drawImage(tex.c, texX, 0, 1, TXS, x, y0, colW + 1, lineH);
-      // окклюзия у стыков с полом и потолком: угол всегда темнее плоскости
+      // Свет идёт от фонаря на уровне глаз: пятно на стене ярче всего
+      // напротив камеры и гаснет к полу и потолку. Один градиент вместо
+      // двух — и физичнее, и дешевле.
       if (lineH > 6) {
-        const ao = Math.min(lineH * 0.34, 46);
-        let ag2 = c.createLinearGradient(0, y0, 0, y0 + ao);
-        ag2.addColorStop(0, 'rgba(0,0,0,0.55)');
-        ag2.addColorStop(1, 'rgba(0,0,0,0)');
-        c.fillStyle = ag2;
-        c.fillRect(x, y0, colW + 1, ao);
-        ag2 = c.createLinearGradient(0, y0 + lineH, 0, y0 + lineH - ao);
-        ag2.addColorStop(0, 'rgba(0,0,0,0.62)');
-        ag2.addColorStop(1, 'rgba(0,0,0,0)');
-        c.fillStyle = ag2;
-        c.fillRect(x, y0 + lineH - ao, colW + 1, ao);
+        const peak = Math.max(0.06, Math.min(0.94, (mid - y0) / lineH));
+        const vg2 = c.createLinearGradient(0, y0, 0, y0 + lineH);
+        // плато вокруг уровня глаз: середина стены остаётся освещённой,
+        // темнеют только стыки с полом и потолком
+        vg2.addColorStop(0, 'rgba(0,0,0,0.5)');
+        vg2.addColorStop(Math.max(0.01, peak - 0.3), 'rgba(0,0,0,0.04)');
+        vg2.addColorStop(peak, 'rgba(0,0,0,0)');
+        vg2.addColorStop(Math.min(0.99, peak + 0.3), 'rgba(0,0,0,0.06)');
+        vg2.addColorStop(1, 'rgba(0,0,0,0.56)');
+        c.fillStyle = vg2;
+        c.fillRect(x, y0, colW + 1, lineH);
       }
 
       // затемнение по свету
@@ -2548,8 +2552,43 @@ const Render = (() => {
     }
   }
 
+  // ---------- BLOOM: ореол вокруг яркого ----------
+  // Уменьшаем кадр, возводим яркость в квадрат (так остаются только
+  // источники света), размываем и добавляем обратно. Дёшево, потому
+  // что вся работа идёт на картинке в 8 раз меньше экрана.
+  function bloomPass(c) {
+    const bw = Math.max(40, (W / 8) | 0), bh = Math.max(24, (H / 8) | 0);
+    if (!bloomA) { bloomA = document.createElement('canvas'); bloomB = document.createElement('canvas'); }
+    if (bloomA.width !== bw || bloomA.height !== bh) {
+      bloomA.width = bloomB.width = bw;
+      bloomA.height = bloomB.height = bh;
+    }
+    const ga = bloomA.getContext('2d');
+    ga.globalCompositeOperation = 'source-over';
+    ga.clearRect(0, 0, bw, bh);
+    ga.drawImage(frame, 0, 0, bw, bh);
+    // яркость в квадрат — тусклое гаснет, яркое остаётся
+    ga.globalCompositeOperation = 'multiply';
+    ga.drawImage(bloomA, 0, 0);
+    ga.globalCompositeOperation = 'source-over';
+    // размытие
+    const gb = bloomB.getContext('2d');
+    gb.clearRect(0, 0, bw, bh);
+    gb.filter = 'blur(3px)';
+    gb.drawImage(bloomA, 0, 0);
+    gb.filter = 'none';
+    // добавляем обратно
+    c.save();
+    c.globalCompositeOperation = 'lighter';
+    c.globalAlpha = 0.5;
+    c.imageSmoothingEnabled = true;
+    c.drawImage(bloomB, 0, 0, bw, bh, 0, 0, W, H);
+    c.restore();
+  }
+
   // ---------- сборка кадра: оверлеи + вывод ----------
   function compose(c, view, t, isHunter) {
+    bloomPass(c);
     // цветокор: у Монстра мир в красном; у Жертвы тёплый центр/холодные края
     if (isHunter) {
       c.save();
