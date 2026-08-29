@@ -262,6 +262,34 @@ function generateMap(seed) {
     }
   }
 
+  // --- брошенная больничная утварь в коридорах ---
+  // инвалидные коляски, каталки, капельницы — стоят у стен
+  let junkPlaced = 0;
+  for (let tries = 0; tries < 400 && junkPlaced < 12; tries++) {
+    const x = 2 + Math.floor(rand() * (W - 4));
+    const y = 2 + Math.floor(rand() * (H - 4));
+    if (grid[y][x] !== T.FLOOR) continue;
+    // только в коридорах (не внутри комнат) и у стены
+    const inRoom = rooms.some(r => r.type !== ROOM.CORRIDOR &&
+      x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+    if (inRoom) continue;
+    const nearWall = grid[y - 1][x] === T.WALL || grid[y + 1][x] === T.WALL ||
+      grid[y][x - 1] === T.WALL || grid[y][x + 1] === T.WALL;
+    if (!nearWall) continue;
+    const roll = rand();
+    const kind = roll < 0.4 ? 'wheelchair' : roll < 0.7 ? 'gurney' : 'ivstand';
+    props.push({ x: (x + 0.5) * TILE, y: (y + 0.5) * TILE, kind, r: rand() });
+    junkPlaced++;
+  }
+  // --- подвешенные мешки в морге и операционной ---
+  for (const room of placedRooms) {
+    if (room.type !== ROOM.MORGUE && room.type !== ROOM.OPERATING) continue;
+    for (let i = 0; i < 2; i++) {
+      const c = freeCell(room);
+      if (c) props.push({ x: (c.x + 0.5) * TILE, y: (c.y + 0.5) * TILE, kind: 'bodybag', r: rand() });
+    }
+  }
+
   // --- точки спавна: по разные концы главного коридора ---
   const spawnA = { x: 4.5 * TILE, y: (mainY + 1.5) * TILE };
   const spawnB = { x: (W - 4.5) * TILE, y: (mainY + 1.5) * TILE };

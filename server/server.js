@@ -88,6 +88,7 @@ wss.on('connection', (ws) => {
     switch (msg.type) {
       // --- вход в игру ---
       case 'join': {
+        if (mySlot >= 0) return; // этот сокет уже в игре — повторный join игнорируем
         const name = String(msg.name || 'Пациент').slice(0, 16).trim() || 'Пациент';
 
         // попытка переподключения по токену

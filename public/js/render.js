@@ -181,115 +181,407 @@ const Render = (() => {
 
   // ---------- палитры комнат ----------
   const PALETTES = {
-    corridor: { plaster: [64, 60, 52], paint: [42, 58, 40], grime: [30, 26, 18] },
-    ward: { plaster: [70, 64, 52], paint: [66, 62, 40], grime: [36, 28, 16] },
-    operating: { plaster: [60, 70, 68], paint: [40, 66, 62], grime: [22, 32, 30] },
-    boiler: { plaster: [62, 50, 38], paint: [70, 48, 22], grime: [34, 22, 12] },
-    morgue: { plaster: [58, 64, 70], paint: [40, 52, 64], grime: [24, 28, 34] },
-    children: { plaster: [72, 62, 60], paint: [86, 54, 66], grime: [40, 26, 24] },
-    storage: { plaster: [62, 62, 54], paint: [56, 56, 38], grime: [30, 30, 20] },
+    corridor: { plaster: [64, 60, 52], paint: [42, 58, 40], grime: [30, 26, 18], floorA: [52, 54, 48], floorB: [42, 44, 38] },
+    ward: { plaster: [70, 64, 52], paint: [66, 62, 40], grime: [36, 28, 16], floorA: [58, 52, 42], floorB: [48, 43, 34] },
+    operating: { plaster: [60, 70, 68], paint: [40, 66, 62], grime: [22, 32, 30], floorA: [56, 64, 62], floorB: [44, 52, 50] },
+    boiler: { plaster: [62, 50, 38], paint: [70, 48, 22], grime: [34, 22, 12], floorA: [48, 40, 32], floorB: [38, 32, 25] },
+    morgue: { plaster: [58, 64, 70], paint: [40, 52, 64], grime: [24, 28, 34], floorA: [52, 58, 64], floorB: [42, 47, 53] },
+    children: { plaster: [72, 62, 60], paint: [86, 54, 66], grime: [40, 26, 24], floorA: [60, 52, 50], floorB: [48, 42, 40] },
+    storage: { plaster: [62, 62, 54], paint: [56, 56, 38], grime: [30, 30, 20], floorA: [50, 50, 44], floorB: [40, 40, 35] },
   };
+  const TXS = 128; // размер текстуры
 
-  // ---------- текстуры стен ----------
-  function makeWallTex(palKey) {
-    const pal = PALETTES[palKey] || PALETTES.corridor;
-    const c = document.createElement('canvas');
-    c.width = c.height = 64;
-    const g = c.getContext('2d');
-    // штукатурка с шумом
-    for (let y = 0; y < 64; y++) {
-      for (let x = 0; x < 64; x += 4) {
-        const n = tileRand(x + palKey.length * 91, y * 3) * 0.5 + 0.5;
-        const k = 0.75 + n * 0.4;
-        g.fillStyle = `rgb(${pal.plaster[0] * k | 0},${pal.plaster[1] * k | 0},${pal.plaster[2] * k | 0})`;
-        g.fillRect(x, y, 4, 1);
-      }
-    }
-    // нижняя панель — больничная краска
-    g.fillStyle = `rgba(${pal.paint[0]},${pal.paint[1]},${pal.paint[2]},0.9)`;
-    g.fillRect(0, 34, 64, 26);
-    // облупившиеся пятна на краске (видна штукатурка)
-    for (let i = 0; i < 7; i++) {
-      const r = tileRand(i * 13 + palKey.length, i * 7);
-      if (r < 0.3) continue;
-      const k = 0.8 + r * 0.3;
-      g.fillStyle = `rgb(${pal.plaster[0] * k | 0},${pal.plaster[1] * k | 0},${pal.plaster[2] * k | 0})`;
-      const px = r * 60, py = 36 + tileRand(i, i * 3) * 20;
-      g.beginPath();
-      g.ellipse(px, py, 3 + r * 6, 2 + r * 4, r * 3, 0, 7);
-      g.fill();
-    }
-    // разделительная полоса и плинтус
-    g.fillStyle = 'rgba(20,16,12,0.8)';
-    g.fillRect(0, 33, 64, 2);
-    g.fillStyle = 'rgba(12,10,8,0.95)';
-    g.fillRect(0, 60, 64, 4);
-    // потолочный карниз
-    g.fillStyle = 'rgba(18,15,12,0.7)';
-    g.fillRect(0, 0, 64, 3);
-    // грязные потёки сверху вниз
-    for (let i = 0; i < 5; i++) {
-      const r = tileRand(i * 31, palKey.length * 7 + i);
-      if (r < 0.35) continue;
-      g.fillStyle = `rgba(${pal.grime[0]},${pal.grime[1]},${pal.grime[2]},${0.25 + r * 0.3})`;
-      const x = r * 62;
-      g.fillRect(x, 3, 1.5 + r * 2, 20 + r * 38);
-    }
-    // трещины
-    g.strokeStyle = 'rgba(10,8,6,0.6)';
-    g.lineWidth = 1;
-    for (let i = 0; i < 2; i++) {
-      const r = tileRand(i + 5, palKey.length * 3);
-      if (r < 0.4) continue;
-      g.beginPath();
-      let x = r * 55, y = 4;
-      g.moveTo(x, y);
-      for (let s = 0; s < 4; s++) {
-        x += (tileRand(x + s, y) - 0.5) * 14; y += 8 + tileRand(y, x) * 8;
-        g.lineTo(x, y);
-      }
-      g.stroke();
-    }
-    return c;
+  // списки текстур и карты вариантов по тайлам
+  const wallTexList = [];   // [{c, data:Uint32Array}]
+  const floorTexList = [];
+  const ceilTexList = [];
+  const wallTexIdx = {};    // palKey -> [индексы вариантов]
+  const floorTexIdx = {};
+  let wallMapTex = null;    // Uint8Array(W*H): какая текстура у тайла-стены
+  let floorMapTex = null;   // Uint8Array(W*H): какая текстура пола
+  let ceilMapTex = null;
+
+  function texData(c) {
+    const d = c.getContext('2d').getImageData(0, 0, TXS, TXS);
+    return { c, data: new Uint32Array(d.data.buffer) };
   }
 
-  function makeWindowTex(lit) {
-    const c = document.createElement('canvas');
-    c.width = c.height = 64;
-    const g = c.getContext('2d');
-    g.drawImage(wallTex.corridor, 0, 0);
-    // проём
-    g.fillStyle = lit ? '#cdd6ee' : '#0a0f1c';
-    g.fillRect(10, 8, 44, 42);
-    if (!lit) {
-      const gg = g.createLinearGradient(10, 8, 54, 50);
-      gg.addColorStop(0, 'rgba(70,90,130,0.25)');
-      gg.addColorStop(1, 'rgba(20,26,40,0.12)');
-      g.fillStyle = gg;
-      g.fillRect(10, 8, 44, 42);
-    } else {
-      const gg = g.createRadialGradient(32, 28, 2, 32, 28, 30);
-      gg.addColorStop(0, '#ffffff');
-      gg.addColorStop(1, 'rgba(180,195,235,0.6)');
-      g.fillStyle = gg;
-      g.fillRect(10, 8, 44, 42);
+  // шум-помощник
+  function texNoise(g, alpha, cell) {
+    for (let y = 0; y < TXS; y += cell) {
+      for (let x = 0; x < TXS; x += cell) {
+        const v = Math.random();
+        g.fillStyle = `rgba(0,0,0,${(v * alpha).toFixed(3)})`;
+        g.fillRect(x, y, cell, cell);
+      }
     }
-    // рама
+  }
+
+  // --- стена: вариант 0/1 — обычная, 2 — кровь, 3+ — надписи ---
+  function makeWallTex(palKey, variant, word) {
+    const pal = PALETTES[palKey] || PALETTES.corridor;
+    const c = document.createElement('canvas');
+    c.width = c.height = TXS;
+    const g = c.getContext('2d');
+    // штукатурка: вертикальный градиент + шум
+    const vg = g.createLinearGradient(0, 0, 0, TXS);
+    vg.addColorStop(0, `rgb(${pal.plaster[0] * 0.7 | 0},${pal.plaster[1] * 0.7 | 0},${pal.plaster[2] * 0.7 | 0})`);
+    vg.addColorStop(0.4, `rgb(${pal.plaster[0]},${pal.plaster[1]},${pal.plaster[2]})`);
+    vg.addColorStop(1, `rgb(${pal.plaster[0] * 0.85 | 0},${pal.plaster[1] * 0.85 | 0},${pal.plaster[2] * 0.85 | 0})`);
+    g.fillStyle = vg;
+    g.fillRect(0, 0, TXS, TXS);
+    texNoise(g, 0.16, 2);
+    // нижняя панель краски с бликом по верхней кромке
+    const py0 = 66;
+    g.fillStyle = `rgba(${pal.paint[0]},${pal.paint[1]},${pal.paint[2]},0.92)`;
+    g.fillRect(0, py0, TXS, TXS - py0);
+    g.fillStyle = 'rgba(255,255,255,0.07)';
+    g.fillRect(0, py0 + 2, TXS, 2);
+    texNoise(g, 0.1, 3);
+    // облупившаяся краска — рваные пятна штукатурки
+    const peels = 4 + ((variant * 7) % 4);
+    for (let i = 0; i < peels; i++) {
+      const r = tileRand(i * 13 + variant * 71, i * 7 + palKey.length);
+      const px = r * TXS, py = py0 + 6 + tileRand(i, variant) * (TXS - py0 - 16);
+      g.fillStyle = `rgb(${pal.plaster[0] * 0.9 | 0},${pal.plaster[1] * 0.9 | 0},${pal.plaster[2] * 0.9 | 0})`;
+      g.beginPath();
+      g.moveTo(px, py);
+      for (let a = 0; a < 6.3; a += 0.9) {
+        const rr = 5 + tileRand(i + a * 10, variant) * 13;
+        g.lineTo(px + Math.cos(a) * rr, py + Math.sin(a) * rr * 0.7);
+      }
+      g.closePath(); g.fill();
+      g.strokeStyle = 'rgba(0,0,0,0.35)';
+      g.lineWidth = 1;
+      g.stroke();
+    }
+    // разделительная полоса, плинтус, карниз
+    g.fillStyle = 'rgba(20,16,12,0.85)';
+    g.fillRect(0, py0 - 3, TXS, 3);
+    g.fillStyle = 'rgba(10,8,7,0.95)';
+    g.fillRect(0, TXS - 7, TXS, 7);
+    g.fillStyle = 'rgba(16,13,11,0.75)';
+    g.fillRect(0, 0, TXS, 5);
+    // потёки грязи
+    for (let i = 0; i < 7; i++) {
+      const r = tileRand(i * 31 + variant * 17, palKey.length * 7 + i);
+      if (r < 0.3) continue;
+      g.fillStyle = `rgba(${pal.grime[0]},${pal.grime[1]},${pal.grime[2]},${0.2 + r * 0.35})`;
+      const x = r * (TXS - 4);
+      const len = 30 + r * 80;
+      g.fillRect(x, 5, 2 + r * 4, len);
+      g.fillStyle = `rgba(${pal.grime[0]},${pal.grime[1]},${pal.grime[2]},${0.12 + r * 0.2})`;
+      g.fillRect(x - 2, 5, 1.5, len * 0.6);
+    }
+    // трещины с «глубиной» (тёмная + светлый край)
+    for (let i = 0; i < 3; i++) {
+      const r = tileRand(i + 5 + variant * 3, palKey.length * 3);
+      if (r < 0.3) continue;
+      let x = r * 110, y = 6;
+      const pts = [[x, y]];
+      for (let s = 0; s < 5; s++) {
+        x += (tileRand(x + s, y + variant) - 0.5) * 26;
+        y += 14 + tileRand(y, x) * 14;
+        pts.push([x, y]);
+      }
+      g.strokeStyle = 'rgba(8,6,5,0.8)';
+      g.lineWidth = 1.6;
+      g.beginPath();
+      g.moveTo(pts[0][0], pts[0][1]);
+      for (const p of pts) g.lineTo(p[0], p[1]);
+      g.stroke();
+      g.strokeStyle = 'rgba(255,255,255,0.06)';
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(pts[0][0] + 1.5, pts[0][1]);
+      for (const p of pts) g.lineTo(p[0] + 1.5, p[1]);
+      g.stroke();
+    }
+    // плесень по углам
+    if (variant % 2 === 1) {
+      g.fillStyle = 'rgba(34,48,26,0.4)';
+      for (let i = 0; i < 12; i++) {
+        const r = tileRand(i * 3, variant * 9 + i);
+        g.beginPath();
+        g.arc(r < 0.5 ? r * 30 : TXS - (r - 0.5) * 55, 8 + tileRand(i, r * 99) * 26, 2 + r * 7, 0, 7);
+        g.fill();
+      }
+    }
+    // КРОВЬ: мазки и отпечаток ладони
+    if (variant === 2) {
+      g.fillStyle = 'rgba(96,14,10,0.65)';
+      g.beginPath();
+      g.ellipse(TXS * 0.42, TXS * 0.4, 22, 30, 0.4, 0, 7);
+      g.fill();
+      // смазанный след волочения вниз
+      const sg = g.createLinearGradient(0, TXS * 0.4, 0, TXS);
+      sg.addColorStop(0, 'rgba(96,14,10,0.55)');
+      sg.addColorStop(1, 'rgba(60,8,6,0.1)');
+      g.fillStyle = sg;
+      g.fillRect(TXS * 0.34, TXS * 0.42, 30, TXS * 0.5);
+      // отпечаток ладони
+      g.fillStyle = 'rgba(110,16,12,0.75)';
+      const hx = TXS * 0.68, hy = TXS * 0.3;
+      g.beginPath(); g.ellipse(hx, hy, 9, 12, 0.15, 0, 7); g.fill();
+      for (let f = 0; f < 5; f++) {
+        g.beginPath();
+        g.ellipse(hx - 8 + f * 4.4, hy - 13 - (f === 2 ? 4 : f === 0 || f === 4 ? -2 : 2), 2, 6.5, (f - 2) * 0.16, 0, 7);
+        g.fill();
+      }
+      // капли
+      for (let i = 0; i < 8; i++) {
+        const r = tileRand(i * 7, 999);
+        g.fillStyle = `rgba(96,14,10,${0.3 + r * 0.4})`;
+        g.beginPath();
+        g.arc(r * TXS, TXS * 0.3 + tileRand(i, 55) * TXS * 0.5, 1 + r * 3, 0, 7);
+        g.fill();
+      }
+    }
+    // НАДПИСЬ, нацарапанная/кровью
+    if (word) {
+      g.save();
+      g.translate(TXS / 2, TXS * 0.34);
+      g.rotate((tileRand(word.length, variant) - 0.5) * 0.3);
+      g.font = `bold ${TXS * 0.19}px Georgia, serif`;
+      g.textAlign = 'center';
+      for (const [ox, oy, al] of [[1.5, 1, 0.5], [-1, -0.7, 0.4], [0, 0, 0.8]]) {
+        g.fillStyle = `rgba(96,14,12,${al})`;
+        g.fillText(word, ox, oy);
+      }
+      // потёки от букв
+      g.strokeStyle = 'rgba(96,14,12,0.5)';
+      g.lineWidth = 2;
+      for (let i = -2; i <= 2; i++) {
+        g.beginPath();
+        g.moveTo(i * 20, 6);
+        g.lineTo(i * 20 + 2, 20 + tileRand(i + 5, 3) * 22);
+        g.stroke();
+      }
+      g.restore();
+    }
+    return texData(c);
+  }
+
+  // --- окно ---
+  function makeWindowTexN(lit) {
+    const c = document.createElement('canvas');
+    c.width = c.height = TXS;
+    const g = c.getContext('2d');
+    g.drawImage(wallTexList[wallTexIdx.corridor[0]].c, 0, 0);
+    g.fillStyle = lit ? '#cdd6ee' : '#0a0f1c';
+    g.fillRect(20, 16, 88, 84);
+    if (!lit) {
+      const gg = g.createLinearGradient(20, 16, 108, 100);
+      gg.addColorStop(0, 'rgba(70,90,130,0.3)');
+      gg.addColorStop(0.5, 'rgba(30,40,66,0.15)');
+      gg.addColorStop(1, 'rgba(16,20,34,0.1)');
+      g.fillStyle = gg;
+      g.fillRect(20, 16, 88, 84);
+      // силуэт мёртвого дерева за окном
+      g.strokeStyle = 'rgba(4,6,10,0.8)';
+      g.lineWidth = 2.5;
+      g.beginPath();
+      g.moveTo(76, 100); g.lineTo(70, 60); g.lineTo(56, 38);
+      g.moveTo(70, 60); g.lineTo(84, 42); g.lineTo(92, 30);
+      g.moveTo(84, 42) ; g.lineTo(78, 28);
+      g.stroke();
+    } else {
+      const gg = g.createRadialGradient(64, 52, 4, 64, 52, 60);
+      gg.addColorStop(0, '#ffffff');
+      gg.addColorStop(1, 'rgba(180,195,235,0.65)');
+      g.fillStyle = gg;
+      g.fillRect(20, 16, 88, 84);
+      // то же дерево — чёрным контражуром
+      g.strokeStyle = 'rgba(10,12,18,0.9)';
+      g.lineWidth = 3;
+      g.beginPath();
+      g.moveTo(76, 100); g.lineTo(70, 60); g.lineTo(56, 38);
+      g.moveTo(70, 60); g.lineTo(84, 42); g.lineTo(92, 30);
+      g.stroke();
+    }
+    // рама и решётка (лечебница всё-таки)
     g.strokeStyle = '#38301f';
+    g.lineWidth = 5;
+    g.strokeRect(20, 16, 88, 84);
     g.lineWidth = 3;
-    g.strokeRect(10, 8, 44, 42);
     g.beginPath();
-    g.moveTo(32, 8); g.lineTo(32, 50);
-    g.moveTo(10, 29); g.lineTo(54, 29);
+    g.moveTo(64, 16); g.lineTo(64, 100);
+    g.moveTo(20, 58); g.lineTo(108, 58);
     g.stroke();
-    // трещины стекла
-    g.strokeStyle = lit ? 'rgba(90,100,130,0.8)' : 'rgba(150,170,190,0.35)';
+    g.strokeStyle = 'rgba(30,26,20,0.9)';
+    g.lineWidth = 2;
+    for (const x of [37, 91]) { g.beginPath(); g.moveTo(x, 16); g.lineTo(x, 100); g.stroke(); }
+    // трещины
+    g.strokeStyle = lit ? 'rgba(90,100,130,0.8)' : 'rgba(150,170,190,0.4)';
+    g.lineWidth = 1.2;
+    g.beginPath();
+    g.moveTo(40, 28); g.lineTo(58, 50); g.lineTo(48, 80);
+    g.moveTo(80, 24); g.lineTo(88, 48);
+    g.stroke();
+    // подоконник с потёками
+    g.fillStyle = 'rgba(26,22,17,0.9)';
+    g.fillRect(16, 100, 96, 7);
+    g.fillStyle = 'rgba(20,17,13,0.5)';
+    g.fillRect(30, 107, 5, 14);
+    g.fillRect(80, 107, 4, 10);
+    return texData(c);
+  }
+
+  // --- пол: плитка; вариант 1 — битая, 2 — кровавая ---
+  function makeFloorTex(palKey, variant) {
+    const pal = PALETTES[palKey] || PALETTES.corridor;
+    const c = document.createElement('canvas');
+    c.width = c.height = TXS;
+    const g = c.getContext('2d');
+    const half = TXS / 2;
+    // 2×2 шахматные плитки на тайл
+    for (let ty = 0; ty < 2; ty++) {
+      for (let tx = 0; tx < 2; tx++) {
+        const even = (tx + ty) % 2 === 0;
+        const base = even ? pal.floorA : pal.floorB;
+        const gg = g.createLinearGradient(tx * half, ty * half, tx * half + half, ty * half + half);
+        gg.addColorStop(0, `rgb(${base[0]},${base[1]},${base[2]})`);
+        gg.addColorStop(1, `rgb(${base[0] * 0.72 | 0},${base[1] * 0.72 | 0},${base[2] * 0.72 | 0})`);
+        g.fillStyle = gg;
+        g.fillRect(tx * half, ty * half, half, half);
+        // блик кромки
+        g.strokeStyle = 'rgba(255,255,255,0.05)';
+        g.strokeRect(tx * half + 1, ty * half + 1, half - 2, half - 2);
+      }
+    }
+    texNoise(g, 0.18, 2);
+    // затирка
+    g.strokeStyle = 'rgba(12,11,9,0.9)';
+    g.lineWidth = 3;
+    g.beginPath();
+    g.moveTo(half, 0); g.lineTo(half, TXS);
+    g.moveTo(0, half); g.lineTo(TXS, half);
+    g.stroke();
+    g.strokeRect(0, 0, TXS, TXS);
+    // грязь-разводы
+    for (let i = 0; i < 5; i++) {
+      const r = tileRand(i * 11 + variant * 5, palKey.length * 13 + i);
+      g.fillStyle = `rgba(${pal.grime[0]},${pal.grime[1]},${pal.grime[2]},${0.12 + r * 0.22})`;
+      g.beginPath();
+      g.ellipse(r * TXS, tileRand(i, r * 77) * TXS, 14 + r * 26, 8 + r * 16, r * 6, 0, 7);
+      g.fill();
+    }
+    if (variant === 1) { // битая плитка: сколы до бетона
+      g.fillStyle = '#241f19';
+      g.beginPath();
+      g.moveTo(TXS * 0.55, TXS * 0.2);
+      g.lineTo(TXS * 0.9, TXS * 0.35);
+      g.lineTo(TXS * 0.8, TXS * 0.7);
+      g.lineTo(TXS * 0.5, TXS * 0.55);
+      g.closePath(); g.fill();
+      texNoise(g, 0.2, 3);
+      g.strokeStyle = 'rgba(6,5,4,0.9)';
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(TXS * 0.1, TXS * 0.75);
+      g.lineTo(TXS * 0.35, TXS * 0.6);
+      g.lineTo(TXS * 0.3, TXS * 0.35);
+      g.stroke();
+    }
+    if (variant === 2) { // кровавая лужа со следом волочения
+      const bg = g.createRadialGradient(TXS * 0.45, TXS * 0.5, 4, TXS * 0.45, TXS * 0.5, TXS * 0.42);
+      bg.addColorStop(0, 'rgba(88,10,8,0.85)');
+      bg.addColorStop(0.7, 'rgba(70,8,6,0.55)');
+      bg.addColorStop(1, 'rgba(50,6,5,0)');
+      g.fillStyle = bg;
+      g.beginPath();
+      g.ellipse(TXS * 0.45, TXS * 0.5, TXS * 0.4, TXS * 0.3, 0.3, 0, 7);
+      g.fill();
+      g.fillStyle = 'rgba(70,8,6,0.5)';
+      g.fillRect(TXS * 0.3, TXS * 0.1, TXS * 0.24, TXS * 0.45);
+      for (let i = 0; i < 6; i++) {
+        const r = tileRand(i * 9, 313);
+        g.fillStyle = `rgba(80,10,8,${0.3 + r * 0.4})`;
+        g.beginPath();
+        g.arc(r * TXS, tileRand(i, 77) * TXS, 1.5 + r * 4, 0, 7);
+        g.fill();
+      }
+    }
+    return texData(c);
+  }
+
+  // --- потолок: панели; вариант 1 — пятна, 2 — дыра с проводами ---
+  function makeCeilTex(variant) {
+    const c = document.createElement('canvas');
+    c.width = c.height = TXS;
+    const g = c.getContext('2d');
+    g.fillStyle = '#3a3730';
+    g.fillRect(0, 0, TXS, TXS);
+    texNoise(g, 0.2, 3);
+    // панели 2×2 с фаской
+    const half = TXS / 2;
+    g.strokeStyle = 'rgba(14,12,10,0.9)';
+    g.lineWidth = 4;
+    g.beginPath();
+    g.moveTo(half, 0); g.lineTo(half, TXS);
+    g.moveTo(0, half); g.lineTo(TXS, half);
+    g.stroke();
+    g.strokeRect(0, 0, TXS, TXS);
+    g.strokeStyle = 'rgba(255,255,255,0.045)';
     g.lineWidth = 1;
-    g.beginPath();
-    g.moveTo(20, 14); g.lineTo(30, 26); g.lineTo(24, 40);
-    g.moveTo(40, 12); g.lineTo(44, 24);
-    g.stroke();
-    return c;
+    for (const [px, py] of [[0, 0], [half, 0], [0, half], [half, half]]) {
+      g.strokeRect(px + 3, py + 3, half - 6, half - 6);
+    }
+    if (variant === 1) { // жёлто-бурые пятна протечек
+      for (let i = 0; i < 4; i++) {
+        const r = tileRand(i * 17, 41 + i);
+        const sg = g.createRadialGradient(r * TXS, tileRand(i, 3) * TXS, 2, r * TXS, tileRand(i, 3) * TXS, 18 + r * 30);
+        sg.addColorStop(0, 'rgba(70,54,28,0.65)');
+        sg.addColorStop(0.7, 'rgba(56,44,24,0.35)');
+        sg.addColorStop(1, 'rgba(46,38,22,0)');
+        g.fillStyle = sg;
+        g.fillRect(0, 0, TXS, TXS);
+      }
+    }
+    if (variant === 2) { // вывалившаяся панель: чернота и провода
+      g.fillStyle = '#040404';
+      g.fillRect(half + 4, 6, half - 10, half - 12);
+      g.strokeStyle = 'rgba(40,36,30,0.9)';
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(half + 10, 10);
+      g.quadraticCurveTo(half + 30, half * 0.7, half + 20, half - 8);
+      g.moveTo(half + 40, 8);
+      g.quadraticCurveTo(half + 36, half * 0.5, half + 48, half - 10);
+      g.stroke();
+      // свисающая панель под углом
+      g.fillStyle = '#2e2b25';
+      g.save();
+      g.translate(half + 12, half - 4);
+      g.rotate(0.5);
+      g.fillRect(0, 0, half * 0.6, 8);
+      g.restore();
+    }
+    return texData(c);
+  }
+
+  const WALL_WORDS = ['НЕ СПИ', 'ОНО ВИДИТ', 'БЕГИ', 'ТИШЕ', 'ОНИ ЗДЕСЬ', 'УХОДИ'];
+
+  function buildTextures() {
+    if (wallTexList.length) return;
+    for (const k of Object.keys(PALETTES)) {
+      wallTexIdx[k] = [];
+      wallTexIdx[k].push(wallTexList.push(makeWallTex(k, 0)) - 1);
+      wallTexIdx[k].push(wallTexList.push(makeWallTex(k, 1)) - 1);
+      wallTexIdx[k].push(wallTexList.push(makeWallTex(k, 2)) - 1); // кровь
+      floorTexIdx[k] = [];
+      floorTexIdx[k].push(floorTexList.push(makeFloorTex(k, 0)) - 1);
+      floorTexIdx[k].push(floorTexList.push(makeFloorTex(k, 1)) - 1);
+      floorTexIdx[k].push(floorTexList.push(makeFloorTex(k, 2)) - 1); // кровь
+    }
+    // надписи — на стенах коридоров и детского крыла
+    wallTexIdx.words = [];
+    for (const w of WALL_WORDS) {
+      wallTexIdx.words.push(wallTexList.push(makeWallTex('corridor', 0, w)) - 1);
+    }
+    ceilTexList.push(makeCeilTex(0), makeCeilTex(1), makeCeilTex(2));
+    winTex = makeWindowTexN(false);
+    winLitTex = makeWindowTexN(true);
   }
 
   // ---------- спрайты (билборды) ----------
@@ -535,9 +827,170 @@ const Render = (() => {
     });
     SPR.lampceil.wH = 14; SPR.lampceil.wW = 20; SPR.lampceil.ceil = true;
 
-    // Монстр: два кадра — руки в стороны / руки тянутся
-    SPR.monster0 = makeMonsterSprite(0);
-    SPR.monster1 = makeMonsterSprite(1);
+    // инвалидная коляска (вид сбоку)
+    SPR.wheelchair = spriteCanvas(120, 130, (g, w, h) => {
+      g.strokeStyle = '#3b3f42'; g.lineWidth = 4; g.lineCap = 'round';
+      // большое колесо со спицами
+      const wx = w * 0.42, wy = h * 0.72, R = 30;
+      g.beginPath(); g.arc(wx, wy, R, 0, 7); g.stroke();
+      g.lineWidth = 1.6;
+      for (let i = 0; i < 8; i++) {
+        const a = i * Math.PI / 4 + 0.3;
+        g.beginPath();
+        g.moveTo(wx, wy);
+        g.lineTo(wx + Math.cos(a) * R, wy + Math.sin(a) * R);
+        g.stroke();
+      }
+      g.lineWidth = 3;
+      g.beginPath(); g.arc(wx, wy, 4, 0, 7); g.stroke();
+      // малое колесо
+      g.beginPath(); g.arc(w * 0.75, h * 0.87, 9, 0, 7); g.stroke();
+      // рама, сиденье, спинка, ручки
+      g.strokeStyle = '#4a4f52'; g.lineWidth = 4.5;
+      g.beginPath();
+      g.moveTo(w * 0.30, h * 0.20);              // ручка
+      g.lineTo(w * 0.33, h * 0.52);              // спинка
+      g.lineTo(w * 0.72, h * 0.55);              // сиденье
+      g.lineTo(w * 0.78, h * 0.78);              // к малому колесу
+      g.moveTo(w * 0.33, h * 0.52);
+      g.lineTo(w * 0.38, h * 0.72);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(w * 0.28, h * 0.185);
+      g.lineTo(w * 0.36, h * 0.175);
+      g.stroke();
+      // провисшая ткань сиденья/спинки
+      g.fillStyle = 'rgba(52,50,44,0.95)';
+      g.beginPath();
+      g.moveTo(w * 0.34, h * 0.26);
+      g.quadraticCurveTo(w * 0.30, h * 0.42, w * 0.35, h * 0.52);
+      g.lineTo(w * 0.70, h * 0.545);
+      g.quadraticCurveTo(w * 0.55, h * 0.47, w * 0.40, h * 0.50);
+      g.quadraticCurveTo(w * 0.40, h * 0.36, w * 0.40, h * 0.27);
+      g.closePath(); g.fill();
+      // ржавчина
+      g.fillStyle = 'rgba(110,55,22,0.5)';
+      g.beginPath(); g.arc(wx + R * 0.7, wy - R * 0.5, 4, 0, 7); g.fill();
+      g.beginPath(); g.arc(w * 0.34, h * 0.4, 3, 0, 7); g.fill();
+    });
+    SPR.wheelchair.wH = 34; SPR.wheelchair.wW = 30;
+
+    // каталка с накрытым телом
+    SPR.gurney = spriteCanvas(160, 110, (g, w, h) => {
+      // колёса
+      g.strokeStyle = '#33373a'; g.lineWidth = 3;
+      for (const x of [w * 0.22, w * 0.78]) {
+        g.beginPath(); g.arc(x, h * 0.9, 8, 0, 7); g.stroke();
+      }
+      // рама на ножках
+      g.lineWidth = 3.5;
+      g.beginPath();
+      g.moveTo(w * 0.2, h * 0.55); g.lineTo(w * 0.22, h * 0.88);
+      g.moveTo(w * 0.8, h * 0.55); g.lineTo(w * 0.78, h * 0.88);
+      g.moveTo(w * 0.22, h * 0.72); g.lineTo(w * 0.78, h * 0.72);
+      g.stroke();
+      // столешница
+      g.fillStyle = '#43484c';
+      g.fillRect(w * 0.12, h * 0.52, w * 0.76, 6);
+      // тело под грязной простынёй
+      g.fillStyle = 'rgba(205,200,188,0.95)';
+      g.beginPath();
+      g.moveTo(w * 0.14, h * 0.52);
+      g.bezierCurveTo(w * 0.25, h * 0.30, w * 0.42, h * 0.40, w * 0.52, h * 0.38);
+      g.bezierCurveTo(w * 0.68, h * 0.34, w * 0.80, h * 0.46, w * 0.86, h * 0.52);
+      g.closePath(); g.fill();
+      // пятна проступившей крови
+      g.fillStyle = 'rgba(96,14,10,0.6)';
+      g.beginPath(); g.ellipse(w * 0.5, h * 0.42, 12, 6, 0.2, 0, 7); g.fill();
+      g.fillStyle = 'rgba(96,14,10,0.35)';
+      g.beginPath(); g.ellipse(w * 0.3, h * 0.47, 7, 4, 0, 0, 7); g.fill();
+      // свисающая рука
+      g.strokeStyle = '#9a8a78'; g.lineWidth = 5; g.lineCap = 'round';
+      g.beginPath();
+      g.moveTo(w * 0.62, h * 0.5);
+      g.quadraticCurveTo(w * 0.64, h * 0.62, w * 0.63, h * 0.72);
+      g.stroke();
+      g.fillStyle = '#9a8a78';
+      g.beginPath(); g.arc(w * 0.63, h * 0.74, 4, 0, 7); g.fill();
+    });
+    SPR.gurney.wH = 26; SPR.gurney.wW = 38;
+
+    // стойка капельницы
+    SPR.ivstand = spriteCanvas(70, 190, (g, w, h) => {
+      g.strokeStyle = '#4a4e50'; g.lineWidth = 3;
+      g.beginPath();
+      g.moveTo(w / 2, h * 0.06); g.lineTo(w / 2, h * 0.93);
+      // крюки
+      g.moveTo(w / 2, h * 0.06);
+      g.lineTo(w / 2 - 14, h * 0.10);
+      g.moveTo(w / 2, h * 0.06);
+      g.lineTo(w / 2 + 14, h * 0.10);
+      g.stroke();
+      // ножки
+      g.beginPath();
+      g.moveTo(w / 2, h * 0.93);
+      g.lineTo(w / 2 - 16, h * 0.985);
+      g.moveTo(w / 2, h * 0.93);
+      g.lineTo(w / 2 + 16, h * 0.985);
+      g.moveTo(w / 2, h * 0.93);
+      g.lineTo(w / 2, h * 0.985);
+      g.stroke();
+      // пакет с тёмной жидкостью
+      g.fillStyle = 'rgba(120,26,20,0.85)';
+      g.fillRect(w / 2 - 22, h * 0.11, 16, 26);
+      g.fillStyle = 'rgba(150,150,150,0.4)';
+      g.fillRect(w / 2 - 22, h * 0.11, 16, 4);
+      // трубка вниз, качается
+      g.strokeStyle = 'rgba(180,180,170,0.5)'; g.lineWidth = 1.5;
+      g.beginPath();
+      g.moveTo(w / 2 - 14, h * 0.25);
+      g.quadraticCurveTo(w / 2 - 8, h * 0.5, w / 2 - 16, h * 0.72);
+      g.stroke();
+    });
+    SPR.ivstand.wH = 42; SPR.ivstand.wW = 16;
+
+    // мешок для тела, подвешенный к потолку
+    SPR.bodybag = spriteCanvas(90, 210, (g, w, h) => {
+      // верёвка
+      g.strokeStyle = 'rgba(120,105,80,0.9)'; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(w / 2, 0); g.lineTo(w / 2, h * 0.12); g.stroke();
+      // узел
+      g.fillStyle = 'rgba(100,88,66,0.95)';
+      g.beginPath(); g.arc(w / 2, h * 0.13, 5, 0, 7); g.fill();
+      // сам мешок — тяжёлый, с формой тела
+      const bg2 = g.createLinearGradient(w * 0.2, 0, w * 0.8, 0);
+      bg2.addColorStop(0, '#1c1b18');
+      bg2.addColorStop(0.5, '#33312c');
+      bg2.addColorStop(1, '#181714');
+      g.fillStyle = bg2;
+      g.beginPath();
+      g.moveTo(w / 2, h * 0.13);
+      g.bezierCurveTo(w * 0.24, h * 0.22, w * 0.18, h * 0.45, w * 0.26, h * 0.62); // плечи/локти
+      g.bezierCurveTo(w * 0.3, h * 0.8, w * 0.4, h * 0.96, w / 2, h * 0.97);
+      g.bezierCurveTo(w * 0.6, h * 0.96, w * 0.7, h * 0.8, w * 0.74, h * 0.62);
+      g.bezierCurveTo(w * 0.82, h * 0.45, w * 0.76, h * 0.22, w / 2, h * 0.13);
+      g.fill();
+      // швы-молния
+      g.strokeStyle = 'rgba(140,135,120,0.4)';
+      g.lineWidth = 1.6;
+      g.beginPath();
+      g.moveTo(w / 2, h * 0.16);
+      g.lineTo(w / 2 - 2, h * 0.9);
+      g.stroke();
+      // проступающее лицо?.. просто выпуклость
+      g.fillStyle = 'rgba(255,255,255,0.05)';
+      g.beginPath(); g.ellipse(w * 0.46, h * 0.3, 9, 13, 0.2, 0, 7); g.fill();
+      // тёмное мокрое пятно снизу
+      g.fillStyle = 'rgba(60,12,10,0.6)';
+      g.beginPath(); g.ellipse(w / 2, h * 0.9, 12, 9, 0, 0, 7); g.fill();
+    });
+    SPR.bodybag.wH = 46; SPR.bodybag.wW = 20; SPR.bodybag.ceil = true;
+
+    // Монстр «Будулай»: кадры ходьбы, судорога, бросок
+    SPR.monster0 = makeMonsterSprite('walkA');
+    SPR.monster1 = makeMonsterSprite('walkB');
+    SPR.monsterTwitch = makeMonsterSprite('twitch');
+    SPR.monsterReach = makeMonsterSprite('reach');
     // светящиеся глаза отдельно (не гаснут в темноте)
     SPR.monsterEyes = spriteCanvas(64, 32, (g, w, h) => {
       for (const sx of [-1, 1]) {
@@ -603,101 +1056,240 @@ const Render = (() => {
     return { c, wH: 40, wW: 24 };
   }
 
-  function makeMonsterSprite(frameNo) {
-    const s = spriteCanvas(150, 240, (g, w, h) => {
-      const t = frameNo * 0.9;
-      // дымная аура
-      for (let i = 0; i < 6; i++) {
-        g.fillStyle = `rgba(8,4,10,${0.25 - i * 0.03})`;
+  // ---------- «Будулай»: измождённое существо ----------
+  // kind: walkA | walkB | twitch | reach
+  function makeMonsterSprite(kind) {
+    const s = spriteCanvas(220, 400, (g, w, h) => {
+      const cx = w / 2;
+      const legShift = kind === 'walkA' ? 14 : kind === 'walkB' ? -14 : 0;
+      const headTilt = kind === 'twitch' ? -1.15 : kind === 'reach' ? 0.2 : 0.72;
+      const armReach = kind === 'reach';
+
+      // мёртвенно-бледная кожа
+      const skin = (l) => `rgb(${(150 * l) | 0},${(146 * l) | 0},${(138 * l) | 0})`;
+
+      // --- ноги: слишком длинные, колени внутрь ---
+      for (const side of [-1, 1]) {
+        const hipX = cx + side * 14;
+        const kneeX = cx + side * 6 - side * 4;
+        const footX = cx + side * 12 + (side > 0 ? legShift : -legShift);
+        const grad = g.createLinearGradient(hipX - 10, 0, hipX + 10, 0);
+        grad.addColorStop(0, skin(0.35));
+        grad.addColorStop(0.45, skin(0.8));
+        grad.addColorStop(1, skin(0.3));
+        g.strokeStyle = grad;
+        g.lineWidth = 13;
+        g.lineCap = 'round';
         g.beginPath();
-        g.arc(w / 2 + Math.sin(i * 2.3 + t) * 16, h * 0.45 + i * 16, 22 + i * 5, 0, 7);
+        g.moveTo(hipX, h * 0.52);
+        g.quadraticCurveTo(kneeX, h * 0.72, footX, h * 0.965);
+        g.stroke();
+        // ступня
+        g.fillStyle = skin(0.55);
+        g.beginPath();
+        g.ellipse(footX + side * 5, h * 0.972, 12, 4.5, 0, 0, 7);
         g.fill();
       }
-      // худое вытянутое тело с рваными краями
-      // (не чёрное: в луче фонаря силуэт должен читаться)
-      const bodyGrad = g.createLinearGradient(w / 2 - 20, 0, w / 2 + 20, 0);
-      bodyGrad.addColorStop(0, '#241420');
-      bodyGrad.addColorStop(0.5, '#382030');
-      bodyGrad.addColorStop(1, '#1c1018');
-      g.fillStyle = bodyGrad;
+
+      // --- торс: впалый живот, выпирающие рёбра ---
+      const tg = g.createLinearGradient(cx - 30, 0, cx + 30, 0);
+      tg.addColorStop(0, skin(0.30));
+      tg.addColorStop(0.42, skin(0.88));
+      tg.addColorStop(0.6, skin(0.72));
+      tg.addColorStop(1, skin(0.26));
+      g.fillStyle = tg;
       g.beginPath();
-      g.moveTo(w / 2 - 14, h * 0.2);
-      for (let i = 0; i <= 20; i++) {
-        const yy = h * 0.2 + (h * 0.78) * (i / 20);
-        const wob = Math.sin(i * 1.7 + t * 3) * 4 + Math.sin(i * 3.1) * 2;
-        g.lineTo(w / 2 - 13 - wob - (i > 16 ? (i - 16) * 2 : 0), yy);
-      }
-      for (let i = 20; i >= 0; i--) {
-        const yy = h * 0.2 + (h * 0.78) * (i / 20);
-        const wob = Math.sin(i * 1.9 - t * 3) * 4;
-        g.lineTo(w / 2 + 13 + wob + (i > 16 ? (i - 16) * 2 : 0), yy);
-      }
-      g.closePath(); g.fill();
-      // рёбра, проступающие сквозь кожу
-      g.strokeStyle = 'rgba(90,70,85,0.5)';
-      g.lineWidth = 2;
-      for (let i = 0; i < 4; i++) {
-        const yy = h * 0.32 + i * 14;
+      g.moveTo(cx - 21, h * 0.245);            // плечи
+      g.bezierCurveTo(cx - 30, h * 0.30, cx - 24, h * 0.38, cx - 16, h * 0.44); // рёбра
+      g.bezierCurveTo(cx - 12, h * 0.48, cx - 15, h * 0.52, cx - 15, h * 0.55); // впалый живот
+      g.lineTo(cx + 15, h * 0.55);
+      g.bezierCurveTo(cx + 15, h * 0.52, cx + 12, h * 0.48, cx + 16, h * 0.44);
+      g.bezierCurveTo(cx + 24, h * 0.38, cx + 30, h * 0.30, cx + 21, h * 0.245);
+      g.closePath();
+      g.fill();
+      // рёбра — тёмные дуги с подсветкой снизу
+      for (let i = 0; i < 5; i++) {
+        const yy = h * (0.30 + i * 0.032);
+        g.strokeStyle = 'rgba(40,34,32,0.55)';
+        g.lineWidth = 3;
         g.beginPath();
-        g.moveTo(w / 2 - 11, yy);
-        g.quadraticCurveTo(w / 2, yy + 5, w / 2 + 11, yy);
+        g.moveTo(cx - 17 + i, yy);
+        g.quadraticCurveTo(cx, yy + 7, cx + 17 - i, yy);
+        g.stroke();
+        g.strokeStyle = 'rgba(210,205,195,0.25)';
+        g.lineWidth = 1.4;
+        g.beginPath();
+        g.moveTo(cx - 16 + i, yy + 3);
+        g.quadraticCurveTo(cx, yy + 10, cx + 16 - i, yy + 3);
         g.stroke();
       }
-      // красноватый контур-обводка
-      g.strokeStyle = 'rgba(200,60,55,0.35)';
-      g.lineWidth = 2;
+      // впадина живота
+      g.fillStyle = 'rgba(30,26,26,0.5)';
       g.beginPath();
-      g.moveTo(w / 2 - 14, h * 0.22);
-      g.quadraticCurveTo(w / 2 - 22, h * 0.5, w / 2 - 16, h * 0.9);
-      g.moveTo(w / 2 + 14, h * 0.22);
-      g.quadraticCurveTo(w / 2 + 22, h * 0.5, w / 2 + 16, h * 0.9);
-      g.stroke();
-      // длинные руки с когтями
-      g.strokeStyle = '#1d1219';
-      g.lineWidth = 7; g.lineCap = 'round';
-      const reach = frameNo ? 30 : 12; // кадр 1 — тянется к тебе
+      g.ellipse(cx, h * 0.50, 9, 14, 0, 0, 7);
+      g.fill();
+      // грязь и раны на торсе
+      g.fillStyle = 'rgba(70,20,16,0.55)';
+      g.beginPath(); g.ellipse(cx - 10, h * 0.35, 4, 9, 0.5, 0, 7); g.fill();
+      g.fillStyle = 'rgba(52,40,30,0.5)';
+      g.beginPath(); g.ellipse(cx + 12, h * 0.47, 6, 4, 0.3, 0, 7); g.fill();
+
+      // --- таз/бёдра прикрыты истлевшей тканью ---
+      g.fillStyle = 'rgba(58,54,48,0.9)';
       g.beginPath();
-      g.moveTo(w / 2 - 10, h * 0.3);
-      g.quadraticCurveTo(w / 2 - 44, h * 0.42, w / 2 - 34 - reach * 0.4, h * 0.62 + reach * 0.2);
-      g.moveTo(w / 2 + 10, h * 0.3);
-      g.quadraticCurveTo(w / 2 + 44, h * 0.42, w / 2 + 34 + reach * 0.4, h * 0.62 + reach * 0.2);
-      g.stroke();
-      g.lineWidth = 2.4;
-      for (const sx of [-1, 1]) {
-        const hx = w / 2 + sx * (34 + reach * 0.4), hy = h * 0.62 + reach * 0.2;
-        for (let i = 0; i < 4; i++) {
+      g.moveTo(cx - 17, h * 0.545);
+      g.lineTo(cx + 17, h * 0.545);
+      g.lineTo(cx + 13, h * 0.62 + (kind === 'walkA' ? 4 : 0));
+      g.lineTo(cx + 2, h * 0.60);
+      g.lineTo(cx - 10, h * 0.635);
+      g.closePath();
+      g.fill();
+
+      // --- руки: до колен, вывернутые ---
+      for (const side of [-1, 1]) {
+        const shX = cx + side * 20;
+        const grad = g.createLinearGradient(shX - 8, 0, shX + 8, 0);
+        grad.addColorStop(0, skin(0.3));
+        grad.addColorStop(0.5, skin(0.78));
+        grad.addColorStop(1, skin(0.28));
+        g.strokeStyle = grad;
+        g.lineCap = 'round';
+        if (armReach) {
+          // обе руки тянутся В КАМЕРУ: укорочены перспективой, кисти огромные
+          g.lineWidth = 15;
           g.beginPath();
-          g.moveTo(hx, hy);
-          g.lineTo(hx + sx * (6 + i * 3), hy + 10 + i * 4);
+          g.moveTo(shX, h * 0.27);
+          g.quadraticCurveTo(shX + side * 14, h * 0.33, shX + side * 8, h * 0.40);
           g.stroke();
+          // гигантская кисть
+          const hx = shX + side * 8, hy = h * 0.435;
+          g.fillStyle = skin(0.85);
+          g.beginPath(); g.ellipse(hx, hy, 17, 13, 0, 0, 7); g.fill();
+          g.strokeStyle = skin(0.75);
+          g.lineWidth = 5.5;
+          for (let f = 0; f < 5; f++) {
+            const fa = (f - 2) * 0.42 + (side > 0 ? 0.2 : -0.2);
+            g.beginPath();
+            g.moveTo(hx, hy);
+            g.quadraticCurveTo(hx + Math.sin(fa) * 20, hy + 18, hx + Math.sin(fa) * 30, hy + 30);
+            g.stroke();
+          }
+          // тёмные ногти
+          g.fillStyle = 'rgba(35,28,24,0.95)';
+          for (let f = 0; f < 5; f++) {
+            const fa = (f - 2) * 0.42 + (side > 0 ? 0.2 : -0.2);
+            g.beginPath();
+            g.ellipse(hx + Math.sin(fa) * 30, hy + 31, 3, 5, fa, 0, 7);
+            g.fill();
+          }
+        } else {
+          const sway = kind === 'walkA' ? side * 6 : kind === 'walkB' ? -side * 6 : 0;
+          const tw = kind === 'twitch' ? side * 10 : 0;
+          g.lineWidth = 10;
+          g.beginPath();
+          g.moveTo(shX, h * 0.265);
+          g.quadraticCurveTo(shX + side * 16 + sway, h * 0.42, shX + side * 8 + sway + tw, h * 0.56);
+          g.quadraticCurveTo(shX + side * 6 + sway + tw, h * 0.63, shX + side * 10 + sway + tw, h * 0.70);
+          g.stroke();
+          // кисть с длинными пальцами до бёдер
+          const hx = shX + side * 10 + sway + tw, hy = h * 0.705;
+          g.strokeStyle = skin(0.6);
+          g.lineWidth = 3.2;
+          for (let f = 0; f < 5; f++) {
+            g.beginPath();
+            g.moveTo(hx, hy);
+            g.lineTo(hx + side * (f - 2) * 3 + side * 2, hy + 26 + (f % 3) * 6);
+            g.stroke();
+          }
         }
       }
-      // голова, чуть набок
-      g.save();
-      g.translate(w / 2 + 2, h * 0.14);
-      g.rotate(frameNo ? 0.24 : -0.12);
-      const hg = g.createRadialGradient(-3, -4, 2, 0, 0, 17);
-      hg.addColorStop(0, '#3a222e');
-      hg.addColorStop(1, '#1c0e16');
-      g.fillStyle = hg;
-      g.beginPath(); g.ellipse(0, 0, 13, 17, 0, 0, 7); g.fill();
-      // рваная пасть
-      g.strokeStyle = '#3d0a0a'; g.lineWidth = 2;
+
+      // --- шея и свёрнутая набок голова ---
+      g.strokeStyle = skin(0.7);
+      g.lineWidth = 9;
       g.beginPath();
-      g.moveTo(-6, 8); g.quadraticCurveTo(0, 13, 7, 7);
+      g.moveTo(cx, h * 0.245);
+      g.lineTo(cx + (kind === 'twitch' ? -7 : 5), h * 0.19);
       g.stroke();
-      g.restore();
-      // хребет-шипы
-      g.strokeStyle = '#060308'; g.lineWidth = 3;
-      for (let i = 0; i < 5; i++) {
-        const yy = h * 0.28 + i * 24;
+      g.save();
+      g.translate(cx + (kind === 'twitch' ? -8 : 6), h * 0.155);
+      g.rotate(headTilt);
+      // череп, обтянутый кожей
+      const hg = g.createRadialGradient(-6, -8, 4, 0, 0, 30);
+      hg.addColorStop(0, skin(1.0));
+      hg.addColorStop(0.75, skin(0.72));
+      hg.addColorStop(1, skin(0.4));
+      g.fillStyle = hg;
+      g.beginPath();
+      g.moveTo(0, -26);
+      g.bezierCurveTo(17, -25, 21, -8, 17, 6);   // скулы
+      g.bezierCurveTo(14, 18, 8, 30, 0, 34);     // отвисшая челюсть
+      g.bezierCurveTo(-8, 30, -14, 18, -17, 6);
+      g.bezierCurveTo(-21, -8, -17, -25, 0, -26);
+      g.fill();
+      // редкие пряди волос
+      g.strokeStyle = 'rgba(30,26,22,0.85)';
+      g.lineWidth = 1.6;
+      for (let i = 0; i < 9; i++) {
+        const a = -2.4 + i * 0.34;
         g.beginPath();
-        g.moveTo(w / 2, yy);
-        g.lineTo(w / 2 + (i % 2 ? 8 : -8), yy - 10);
+        g.moveTo(Math.cos(a) * 16, -14 + Math.sin(a) * 10);
+        g.quadraticCurveTo(Math.cos(a) * 26, -4, Math.cos(a) * 24 + 4, 14 + (i % 3) * 8);
         g.stroke();
       }
+      // чёрные провалы глаз (красные точки дорисует слой глаз)
+      for (const sx of [-1, 1]) {
+        g.fillStyle = '#0a0708';
+        g.beginPath();
+        g.ellipse(sx * 8, -8, 5.5, 8, sx * 0.15, 0, 7);
+        g.fill();
+        g.fillStyle = 'rgba(60,20,20,0.55)'; // синяки вокруг
+        g.beginPath();
+        g.ellipse(sx * 8, -6, 8, 11, sx * 0.15, 0, 7);
+        g.fill();
+        g.fillStyle = '#0a0708';
+        g.beginPath();
+        g.ellipse(sx * 8, -8, 5.5, 8, sx * 0.15, 0, 7);
+        g.fill();
+      }
+      // провал носа
+      g.fillStyle = 'rgba(20,14,14,0.9)';
+      g.beginPath();
+      g.moveTo(-2.5, 2); g.lineTo(2.5, 2); g.lineTo(0, 8);
+      g.closePath(); g.fill();
+      // разинутый чёрный рот — слишком широкий, с зубами
+      g.fillStyle = '#0c0506';
+      g.beginPath();
+      g.ellipse(0, 21, 9, 11 + (kind === 'reach' ? 4 : 0), 0, 0, 7);
+      g.fill();
+      g.fillStyle = 'rgba(205,198,180,0.9)';
+      for (let i = -2; i <= 2; i++) {
+        g.beginPath();
+        g.moveTo(i * 3.4 - 1.4, 12.5);
+        g.lineTo(i * 3.4 + 1.4, 12.5);
+        g.lineTo(i * 3.4, 17.5);
+        g.closePath(); g.fill();
+      }
+      // трещины кожи от рта
+      g.strokeStyle = 'rgba(50,30,28,0.7)';
+      g.lineWidth = 1.2;
+      g.beginPath();
+      g.moveTo(-8, 18); g.lineTo(-14, 13);
+      g.moveTo(8, 18); g.lineTo(14, 12);
+      g.stroke();
+      g.restore();
+
+      // --- потёки крови по телу вниз от шеи ---
+      g.strokeStyle = 'rgba(88,16,12,0.6)';
+      g.lineWidth = 3;
+      g.beginPath();
+      g.moveTo(cx + 3, h * 0.24);
+      g.lineTo(cx + 5, h * 0.33);
+      g.moveTo(cx - 6, h * 0.25);
+      g.lineTo(cx - 8, h * 0.30);
+      g.stroke();
     });
-    s.wH = 58; s.wW = 34;
+    s.wH = 58; s.wW = 30;
     return s;
   }
 
@@ -714,10 +1306,52 @@ const Render = (() => {
           if (y >= 0 && x >= 0 && y < m.H && x < m.W) roomOf[y][x] = r.type;
     }
     // текстуры (генерим один раз)
-    if (!wallTex.corridor) {
-      for (const k of Object.keys(PALETTES)) wallTex[k] = makeWallTex(k);
-      winTex = makeWindowTex(false);
-      winLitTex = makeWindowTex(true);
+    buildTextures();
+
+    // --- разложить варианты текстур по тайлам ---
+    // хэш тайла, чтобы стены/пол не выглядели повторяющимися
+    const th = (x, y) => {
+      let h = (x * 73856093) ^ (y * 19349663) ^ rngSeedCache;
+      h = (h ^ (h >> 13)) * 1274126177;
+      return ((h ^ (h >> 16)) >>> 0) / 4294967296;
+    };
+    const walkT = (x, y) => x >= 0 && y >= 0 && x < m.W && y < m.H &&
+      (m.grid[y][x] === 1 || m.grid[y][x] === 3 || m.grid[y][x] === 5);
+    wallMapTex = new Uint8Array(m.W * m.H);
+    floorMapTex = new Uint8Array(m.W * m.H);
+    ceilMapTex = new Uint8Array(m.W * m.H);
+    for (let y = 0; y < m.H; y++) {
+      for (let x = 0; x < m.W; x++) {
+        const idx = y * m.W + x;
+        const t = m.grid[y][x];
+        const r = th(x, y);
+        if (t === 2 || t === 0) {
+          // палитра — по прилегающей комнате
+          let pal = 'corridor';
+          for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+            if (walkT(x + dx, y + dy)) { pal = roomOf[y + dy][x + dx]; break; }
+          }
+          const set = wallTexIdx[pal] || wallTexIdx.corridor;
+          if (r > 0.96 && (pal === 'corridor' || pal === 'children')) {
+            // редкая стена с нацарапанной надписью
+            wallMapTex[idx] = wallTexIdx.words[(r * 1000 | 0) % wallTexIdx.words.length];
+          } else if (r > 0.88 || ((pal === 'morgue' || pal === 'operating') && r > 0.72)) {
+            wallMapTex[idx] = set[2];              // кровь
+          } else {
+            wallMapTex[idx] = set[r > 0.5 ? 1 : 0]; // обычные варианты
+          }
+        } else if (walkT(x, y)) {
+          const pal = roomOf[y][x];
+          const fset = floorTexIdx[pal] || floorTexIdx.corridor;
+          const bloodChance = (pal === 'morgue' || pal === 'operating') ? 0.24 : 0.05;
+          if (r < bloodChance) floorMapTex[idx] = fset[2];
+          else if (r < bloodChance + 0.22) floorMapTex[idx] = fset[1];
+          else floorMapTex[idx] = fset[0];
+          // потолок
+          const rc = th(x + 999, y + 555);
+          ceilMapTex[idx] = rc < 0.1 ? 2 : rc < 0.4 ? 1 : 0;
+        }
+      }
     }
     // потолочные лампы в коридорах
     fx.lamps = [];
@@ -735,6 +1369,82 @@ const Render = (() => {
   }
 
   const isWallTile = (t) => t === 0 || t === 2 || t === 4;
+
+  // ---------- пол и потолок: перспективный рендер ----------
+  // низкое разрешение + сглаженный апскейл = скорость и «мягкая» картинка
+  let lowBuf = null;
+  function ensureLowBuf() {
+    const w = Math.min(232, Math.max(120, W >> 2));
+    const h = Math.min(300, Math.max(150, H >> 2));
+    if (lowBuf && lowBuf.w === w && lowBuf.h === h) return;
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const cx2 = cv.getContext('2d');
+    const img = cx2.createImageData(w, h);
+    lowBuf = { cv, cx2, img, u32: new Uint32Array(img.data.buffer), w, h };
+  }
+
+  function floorcast(px, py, dirX, dirY, planeX, planeY, midScr, isHunter) {
+    ensureLowBuf();
+    const { w, h, u32 } = lowBuf;
+    const midLow = midScr / H * h;
+    const F = (W / 2) / tanHF;              // фокус в экранных px
+    const K = (T / 2) * F * (h / H);        // глаз на половине высоты стены
+    const mW = map.W, mH = map.H;
+    const amb = isHunter ? 0.10 : 0.03;
+    const lightBoost = fx.lightning;
+    const flick = fx.flicker;
+
+    for (let y = 0; y < h; y++) {
+      const dy = y - midLow;
+      const isFloor = dy > 0;
+      const ady = Math.abs(dy);
+      if (ady < 1.2) { // у горизонта — чернота тумана
+        for (let x = 0; x < w; x++) u32[y * w + x] = 0xff000000;
+        continue;
+      }
+      const rowDist = K / ady;
+      // затухание света по дистанции (та же кривая, что у стен)
+      let fall;
+      if (isHunter) fall = Math.max(0, 1 - rowDist / 860) * 0.34 + 0.04;
+      else fall = Math.pow(Math.max(0, 1 - rowDist / 530), 1.4) * 1.3 * flick;
+      const rowCeilK = isFloor ? 1 : 0.55; // потолок темнее
+      let fX = px + rowDist * (dirX - planeX);
+      let fY = py + rowDist * (dirY - planeY);
+      const stX = rowDist * 2 * planeX / w;
+      const stY = rowDist * 2 * planeY / w;
+      const rowO = y * w;
+      for (let x = 0; x < w; x++) {
+        const tX = fX / T | 0, tY = fY / T | 0;
+        let out = 0xff000000;
+        if (tX >= 0 && tY >= 0 && tX < mW && tY < mH) {
+          const mi = tY * mW + tX;
+          const list = isFloor ? floorTexList : ceilTexList;
+          const ti = isFloor ? floorMapTex[mi] : ceilMapTex[mi];
+          const tex = list[ti];
+          if (tex) {
+            let u = ((fX % T) / T * TXS) | 0; if (u < 0) u += TXS;
+            let v = ((fY % T) / T * TXS) | 0; if (v < 0) v += TXS;
+            const texel = tex.data[v * TXS + u];
+            // конус фонарика по горизонтали
+            const camXs = (x / w) * 2 - 1;
+            let b;
+            if (isHunter) b = fall;
+            else b = fall * Math.max(0, 1 - Math.abs(camXs) * 1.3) + amb;
+            b = Math.min(1, (b + lightBoost * (isFloor ? 0.35 : 0.2)) * rowCeilK);
+            const m8 = (b * 256) | 0;
+            const r = ((texel & 255) * m8) >> 8;
+            const g = (((texel >> 8) & 255) * m8) >> 8;
+            const bl = (((texel >> 16) & 255) * m8) >> 8;
+            out = 0xff000000 | (bl << 16) | (g << 8) | r;
+          }
+        }
+        u32[rowO + x] = out;
+        fX += stX; fY += stY;
+      }
+    }
+    lowBuf.cx2.putImageData(lowBuf.img, 0, 0);
+  }
 
   // ---------- свет ----------
   // camXs: -1..1 положение на экране; dist: расстояние
@@ -792,30 +1502,10 @@ const Render = (() => {
     const planeX = -dirY * tanHF, planeY = dirX * tanHF;
     const proj = (W / 2) / tanHF; // расстояние до плоскости проекции
 
-    // --- потолок и пол ---
-    let g = c.createLinearGradient(0, 0, 0, mid);
-    g.addColorStop(0, isHunter ? '#170505' : '#08070a');
-    g.addColorStop(1, '#010101');
-    c.fillStyle = g;
-    c.fillRect(0, 0, W, Math.max(0, mid));
-    g = c.createLinearGradient(0, mid, 0, H);
-    g.addColorStop(0, '#010101');
-    g.addColorStop(1, isHunter ? '#1c0908' : '#100e0c');
-    c.fillStyle = g;
-    c.fillRect(0, mid, W, H - mid);
-    // пятно фонарика на полу
-    if (!isHunter && fx.flicker > 0.05) {
-      const fg2 = c.createRadialGradient(W / 2 + shakeX, H + 40, 20, W / 2 + shakeX, H + 40, H * 0.9);
-      fg2.addColorStop(0, `rgba(255,214,150,${0.14 * fx.flicker})`);
-      fg2.addColorStop(0.5, `rgba(200,160,100,${0.05 * fx.flicker})`);
-      fg2.addColorStop(1, 'rgba(0,0,0,0)');
-      c.fillStyle = fg2;
-      c.fillRect(0, mid, W, H - mid);
-    }
-    if (fx.lightning > 0.05) {
-      c.fillStyle = `rgba(180,190,230,${fx.lightning * 0.12})`;
-      c.fillRect(0, mid, W, H - mid);
-    }
+    // --- потолок и пол: настоящая перспектива с текстурами ---
+    floorcast(px, py, dirX, dirY, planeX, planeY, mid, isHunter);
+    c.imageSmoothingEnabled = true;
+    c.drawImage(lowBuf.cv, 0, 0, lowBuf.w, lowBuf.h, 0, 0, W, H);
 
     // --- стены (рейкастинг) ---
     const colW = W / numRays;
@@ -851,16 +1541,16 @@ const Render = (() => {
       let wallX = side === 0 ? py + perp * rdY : px + perp * rdX;
       wallX = (wallX % T) / T;
       if (wallX < 0) wallX += 1;
-      let texX = Math.floor(wallX * 64);
-      if ((side === 0 && rdX > 0) || (side === 1 && rdY < 0)) texX = 63 - texX;
+      let texX = Math.floor(wallX * TXS);
+      if ((side === 0 && rdX > 0) || (side === 1 && rdY < 0)) texX = TXS - 1 - texX;
 
-      // выбор текстуры по комнате за стеной
+      // текстура: окно или вариант стены из карты вариантов
       let tex;
       if (tile === 4) tex = fx.lightning > 0.4 ? winLitTex : winTex;
-      else tex = wallTex[roomOf[floorY] ? roomOf[floorY][floorX] : 'corridor'] || wallTex.corridor;
+      else tex = wallTexList[wallMapTex[mapY * map.W + mapX]] || wallTexList[0];
 
       const x = i * colW;
-      c.drawImage(tex, texX, 0, 1, 64, x, y0, colW + 1, lineH);
+      c.drawImage(tex.c, texX, 0, 1, TXS, x, y0, colW + 1, lineH);
 
       // затемнение по свету
       let b = lightAt(isHunter, camXs, dist, tile === 4);
@@ -868,11 +1558,6 @@ const Render = (() => {
       const shade = 1 - Math.min(1, b);
       if (shade > 0.01) {
         c.fillStyle = `rgba(0,0,0,${shade.toFixed(3)})`;
-        c.fillRect(x, y0 - 1, colW + 1, lineH + 2);
-      }
-      // красный тон для Монстра — прямо на колонку
-      if (isHunter && b > 0.02) {
-        c.fillStyle = `rgba(120,10,10,${(b * 0.5).toFixed(3)})`;
         c.fillRect(x, y0 - 1, colW + 1, lineH + 2);
       }
     }
@@ -944,7 +1629,11 @@ const Render = (() => {
       const dx = view.foe.x - px, dy = view.foe.y - py;
       const d2 = dx * dx + dy * dy;
       if (d2 < fogDist * fogDist) {
-        const frame2 = Math.sin(t * 6) > 0 ? SPR.monster0 : SPR.monster1;
+        // близко — тянется к тебе; иногда — судорога (дёрганое движение)
+        let frame2;
+        if (d2 < 150 * 150) frame2 = SPR.monsterReach;
+        else if (Math.random() < 0.06) frame2 = SPR.monsterTwitch;
+        else frame2 = Math.sin(t * 7) > 0 ? SPR.monster0 : SPR.monster1;
         list.push({ spr: frame2, x: view.foe.x, y: view.foe.y, d2, monster: true });
       }
     }
@@ -1013,7 +1702,7 @@ const Render = (() => {
       }
       c.globalAlpha = 1;
 
-      // сияние лампы
+      // сияние лампы + пятно света на полу под ней
       if (it.lampGlow) {
         c.save();
         c.globalCompositeOperation = 'lighter';
@@ -1022,12 +1711,28 @@ const Render = (() => {
         gr.addColorStop(1, 'rgba(210,220,180,0)');
         c.fillStyle = gr;
         c.fillRect(screenX - hPix * 2.4, y0 - hPix, hPix * 4.8, hPix * 4.5);
+        // световое пятно на полу
+        const poolW = (60 * proj) / trY;
+        const pg = c.createRadialGradient(screenX, floorScr, 0, screenX, floorScr, poolW);
+        pg.addColorStop(0, `rgba(190,200,160,${0.13 * it.lampGlow})`);
+        pg.addColorStop(1, 'rgba(190,200,160,0)');
+        c.fillStyle = pg;
+        c.save();
+        c.translate(screenX, floorScr);
+        c.scale(1, 0.35);
+        c.translate(-screenX, -floorScr);
+        c.fillRect(screenX - poolW, floorScr - poolW, poolW * 2, poolW * 2);
+        c.restore();
         c.restore();
       }
-      // глаза Монстра светятся всегда
+      // глаза Монстра светятся всегда — наклонены вместе с головой
       if (it.monster) {
-        const ew = (18 * proj) / trY;
-        c.drawImage(SPR.monsterEyes.c, screenX - ew / 2 + wPix * 0.02, y0 + hPix * 0.10, ew, ew / 2);
+        const ew = (15 * proj) / trY;
+        c.save();
+        c.translate(screenX + wPix * 0.03, y0 + hPix * 0.135);
+        c.rotate(0.6);
+        c.drawImage(SPR.monsterEyes.c, -ew / 2, -ew / 4, ew, ew / 2);
+        c.restore();
       }
     }
   }
@@ -1131,6 +1836,25 @@ const Render = (() => {
 
   // ---------- сборка кадра: оверлеи + вывод ----------
   function compose(c, view, t, isHunter) {
+    // цветокор: у Монстра мир в красном; у Жертвы тёплый центр/холодные края
+    if (isHunter) {
+      c.save();
+      c.globalCompositeOperation = 'multiply';
+      const pulse = 0.92 + Math.sin(t * 2.2) * 0.08;
+      c.fillStyle = `rgb(${172 * pulse | 0},${64 * pulse | 0},${58 * pulse | 0})`;
+      c.fillRect(0, 0, W, H);
+      c.restore();
+    } else if (!view.me.hidden) {
+      c.save();
+      c.globalCompositeOperation = 'soft-light';
+      const gr = c.createRadialGradient(W / 2, H / 2, 10, W / 2, H / 2, Math.max(W, H) * 0.7);
+      gr.addColorStop(0, `rgba(255,190,120,${0.5 * fx.flicker})`);
+      gr.addColorStop(0.55, 'rgba(120,110,140,0.12)');
+      gr.addColorStop(1, 'rgba(40,60,110,0.4)');
+      c.fillStyle = gr;
+      c.fillRect(0, 0, W, H);
+      c.restore();
+    }
     // молния — общий засвет
     if (fx.lightning > 0.01 && !view.me.hidden) {
       c.save();

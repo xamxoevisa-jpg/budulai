@@ -226,6 +226,7 @@
     GameAudio.setHeartbeat(0);
     GameAudio.setBreath(0);
     GameAudio.setDread(0);
+    GameAudio.setFear(0);
     UI.setFreeze(0);
   });
 
@@ -490,11 +491,20 @@
         GameAudio.setHeartbeat(G.heart);
         // низкочастотное «давление», когда Монстр совсем рядом
         GameAudio.setDread(G.heart > 0.45 ? (G.heart - 0.45) * 1.8 : 0);
+        // собственное испуганное дыхание
+        GameAudio.setFear(G.heart > 0.25 ? (G.heart - 0.25) * 1.3 : 0);
+        // редкий рык из темноты, когда он близко
+        G.growlTimer = (G.growlTimer || 0) - dt;
+        if (G.heart > 0.5 && G.growlTimer <= 0) {
+          if (GameAudio.ready) GameAudio.growl();
+          G.growlTimer = 4 + Math.random() * 5;
+        }
       } else {
         GameAudio.setBreath(G.breath);
       }
     } else {
       GameAudio.setDread(0);
+      GameAudio.setFear(0);
     }
 
     // --- скримеры ---

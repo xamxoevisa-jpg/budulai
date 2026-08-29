@@ -377,6 +377,60 @@ const GameAudio = (() => {
     n.start(t);
   }
 
+  // испуганное дыхание самой Жертвы — учащается с ужасом
+  let fear = { gain: null, timer: null, level: 0 };
+  function setFear(level) {
+    if (!ctx) return;
+    fear.level = level;
+    if (level > 0.05 && !fear.timer) fearLoop();
+  }
+  function fearLoop() {
+    if (!ctx || fear.level <= 0.05) { fear.timer = null; return; }
+    const t = now();
+    const lv = fear.level;
+    // вдох-выдох: два шумовых свипа
+    const breathOne = (t0, up) => {
+      const src = noiseSource(0.5);
+      const f = ctx.createBiquadFilter();
+      f.type = 'bandpass'; f.Q.value = 1.2;
+      f.frequency.setValueAtTime(up ? 500 : 900, t0);
+      f.frequency.linearRampToValueAtTime(up ? 1100 : 400, t0 + 0.3);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.026 + lv * 0.05, t0 + 0.1);
+      g.gain.linearRampToValueAtTime(0, t0 + 0.34);
+      src.connect(f); f.connect(g); g.connect(master);
+      src.start(t0);
+    };
+    breathOne(t, true);
+    breathOne(t + 0.4 - lv * 0.12, false);
+    const period = 1.6 - lv * 0.8; // от спокойного к паническому
+    fear.timer = setTimeout(fearLoop, period * 1000);
+  }
+
+  // короткий рык Монстра неподалёку (слышит Жертва)
+  function growl() {
+    const t = now();
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(48 + Math.random() * 14, t);
+    o.frequency.linearRampToValueAtTime(34, t + 0.9);
+    const trem = ctx.createOscillator(); trem.frequency.value = 15 + Math.random() * 8;
+    const tg = ctx.createGain(); tg.gain.value = 0.5;
+    const dep = ctx.createGain(); dep.gain.value = 0;
+    trem.connect(tg); tg.connect(dep.gain);
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = 260;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.22, t + 0.15);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
+    o.connect(dep); dep.connect(f); f.connect(g); g.connect(master);
+    const off = ctx.createConstantSource ? ctx.createConstantSource() : null;
+    if (off) { off.offset.value = 0.5; off.connect(dep.gain); off.start(t); }
+    o.start(t); o.stop(t + 1.2); trem.start(t); trem.stop(t + 1.2);
+  }
+
   // «давление» — низкочастотный гул, когда Монстр рядом (для Выжившего)
   let dread = null;
   function setDread(level) {
@@ -519,7 +573,7 @@ const GameAudio = (() => {
 
   return {
     init, unlock, startAmbient, stopAmbient,
-    setHeartbeat, setBreath, setDread,
+    setHeartbeat, setBreath, setDread, setFear, growl,
     doorSlam, childLaugh, whisper, roar, scream, sting, thunder, footstep, closetCreak,
     swell, ratSqueak,
     get ready() { return unlocked; },
