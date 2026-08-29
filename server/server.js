@@ -36,6 +36,18 @@ app.get('/scares', (req, res) => {
   res.json(files);
 });
 
+// фото, которое натягивается на лицо существа (public/monster)
+app.get('/monsterface', (req, res) => {
+  const dir = path.join(__dirname, '..', 'public', 'monster');
+  let files = [];
+  try {
+    files = require('fs').readdirSync(dir)
+      .filter(f => /\.(jpe?g|png|webp)$/i.test(f))
+      .map(f => '/monster/' + f);
+  } catch { /* папки может не быть */ }
+  res.json(files);
+});
+
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const server = http.createServer(app);

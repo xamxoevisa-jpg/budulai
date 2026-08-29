@@ -30,6 +30,7 @@ const Render = (() => {
   let roomOf = null;          // тип комнаты по тайлу (для палитр стен)
   let rngSeedCache = 0;
   let scareImages = [];       // пользовательские фото-скримеры
+  let monsterFaceImg = null;  // фото, натянутое на лицо существа (public/monster)
 
   const T = 48;               // размер клетки мира (px)
   const FOV = 1.15;           // ~66°
@@ -119,6 +120,20 @@ const Render = (() => {
         img.src = url;
         scareImages.push(img);
       }
+    }).catch(() => {});
+
+    // фото для лица существа: подгрузим и перерисуем спрайты монстра
+    fetch('/monsterface').then(r => r.json()).then(list => {
+      if (!list.length) return;
+      const img = new Image();
+      img.onload = () => {
+        monsterFaceImg = img;
+        SPR.monster0 = makeMonsterSprite('walkA');
+        SPR.monster1 = makeMonsterSprite('walkB');
+        SPR.monsterTwitch = makeMonsterSprite('twitch');
+        SPR.monsterReach = makeMonsterSprite('reach');
+      };
+      img.src = list[0];
     }).catch(() => {});
 
     buildSprites();
@@ -992,17 +1007,19 @@ const Render = (() => {
     SPR.monsterTwitch = makeMonsterSprite('twitch');
     SPR.monsterReach = makeMonsterSprite('reach');
     // светящиеся глаза отдельно (не гаснут в темноте)
+    // тлеющие зрачки: тусклый уголёк в глубине глазницы, не «фары»
     SPR.monsterEyes = spriteCanvas(64, 32, (g, w, h) => {
       for (const sx of [-1, 1]) {
         const x = w / 2 + sx * 10;
-        const gr = g.createRadialGradient(x, h / 2, 0, x, h / 2, 9);
-        gr.addColorStop(0, 'rgba(255,60,40,1)');
-        gr.addColorStop(0.3, 'rgba(255,30,20,0.9)');
-        gr.addColorStop(1, 'rgba(255,20,10,0)');
+        const gr = g.createRadialGradient(x, h / 2, 0, x, h / 2, 11);
+        gr.addColorStop(0, 'rgba(255,110,70,0.95)');
+        gr.addColorStop(0.22, 'rgba(220,40,26,0.75)');
+        gr.addColorStop(0.55, 'rgba(150,18,12,0.3)');
+        gr.addColorStop(1, 'rgba(120,10,8,0)');
         g.fillStyle = gr;
-        g.fillRect(x - 9, h / 2 - 9, 18, 18);
-        g.fillStyle = '#ffd9c8';
-        g.beginPath(); g.arc(x, h / 2, 1.6, 0, 7); g.fill();
+        g.fillRect(x - 11, h / 2 - 11, 22, 22);
+        g.fillStyle = 'rgba(255,220,190,0.9)';
+        g.beginPath(); g.arc(x, h / 2, 1.1, 0, 7); g.fill();
       }
     });
 
@@ -1056,240 +1073,663 @@ const Render = (() => {
     return { c, wH: 40, wW: 24 };
   }
 
-  // ---------- «Будулай»: измождённое существо ----------
+  // ---------- «Будулай»: анатомическая модель ----------
+  // Рисуется один раз в высоком разрешении (440×800), дальше — билборд.
+  // Свет падает от камеры (фонарик), поэтому объём запекаем в текстуру:
+  // центр тела светлый, края уходят в тень, во впадинах — окклюзия.
   // kind: walkA | walkB | twitch | reach
   function makeMonsterSprite(kind) {
-    const s = spriteCanvas(220, 400, (g, w, h) => {
+    const s = spriteCanvas(440, 800, (g, w, h) => {
       const cx = w / 2;
-      const legShift = kind === 'walkA' ? 14 : kind === 'walkB' ? -14 : 0;
-      const headTilt = kind === 'twitch' ? -1.15 : kind === 'reach' ? 0.2 : 0.72;
-      const armReach = kind === 'reach';
+      const reach = kind === 'reach';
+      const twitch = kind === 'twitch';
+      const legPhase = kind === 'walkA' ? 1 : kind === 'walkB' ? -1 : 0;
+      const headTilt = twitch ? -1.3 : reach ? 0.14 : 0.66;
 
-      // мёртвенно-бледная кожа
-      const skin = (l) => `rgb(${(150 * l) | 0},${(146 * l) | 0},${(138 * l) | 0})`;
+      // --- палитра мёртвой кожи: низкий ключ, сильный контраст.
+      // Тело почти целиком в тени, свет цепляет только кость и хрящ —
+      // остальное дорисовывает воображение. Так работает хоррор-арт.
+      const SK = {
+        deep: '#0b0a09', dark: '#221f1b', mid: '#443f37',
+        base: '#665f54', lit: '#9c9484', wet: '#c6bda9',
+        sub: '#5c342e',              // подкожная краснота
+        bruise: '#38293c',           // трупные пятна
+      };
 
-      // --- ноги: слишком длинные, колени внутрь ---
-      for (const side of [-1, 1]) {
-        const hipX = cx + side * 14;
-        const kneeX = cx + side * 6 - side * 4;
-        const footX = cx + side * 12 + (side > 0 ? legShift : -legShift);
-        const grad = g.createLinearGradient(hipX - 10, 0, hipX + 10, 0);
-        grad.addColorStop(0, skin(0.35));
-        grad.addColorStop(0.45, skin(0.8));
-        grad.addColorStop(1, skin(0.3));
-        g.strokeStyle = grad;
-        g.lineWidth = 13;
-        g.lineCap = 'round';
+      // тонкая конечность: полигон переменной толщины + поперечный градиент
+      const limb = (pts, ws, shiftLit) => {
+        const left = [], right = [];
+        for (let i = 0; i < pts.length; i++) {
+          const prev = pts[Math.max(0, i - 1)], next = pts[Math.min(pts.length - 1, i + 1)];
+          const a = Math.atan2(next[1] - prev[1], next[0] - prev[0]) + Math.PI / 2;
+          const wi = ws[i];
+          left.push([pts[i][0] + Math.cos(a) * wi, pts[i][1] + Math.sin(a) * wi]);
+          right.push([pts[i][0] - Math.cos(a) * wi, pts[i][1] - Math.sin(a) * wi]);
+        }
         g.beginPath();
-        g.moveTo(hipX, h * 0.52);
-        g.quadraticCurveTo(kneeX, h * 0.72, footX, h * 0.965);
-        g.stroke();
-        // ступня
-        g.fillStyle = skin(0.55);
-        g.beginPath();
-        g.ellipse(footX + side * 5, h * 0.972, 12, 4.5, 0, 0, 7);
+        g.moveTo(left[0][0], left[0][1]);
+        for (const p of left) g.lineTo(p[0], p[1]);
+        for (let i = right.length - 1; i >= 0; i--) g.lineTo(right[i][0], right[i][1]);
+        g.closePath();
+        let minX = 1e9, maxX = -1e9;
+        for (const p of left.concat(right)) { if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0]; }
+        const lg = g.createLinearGradient(minX, 0, maxX, 0);
+        const k = shiftLit || 0.5;
+        lg.addColorStop(0, SK.deep);
+        lg.addColorStop(0.18, SK.dark);
+        lg.addColorStop(Math.max(0.2, k - 0.06), SK.base);
+        lg.addColorStop(k, SK.lit);
+        lg.addColorStop(Math.min(0.9, k + 0.22), SK.mid);
+        lg.addColorStop(1, SK.deep);
+        g.fillStyle = lg;
         g.fill();
-      }
+      };
 
-      // --- торс: впалый живот, выпирающие рёбра ---
-      const tg = g.createLinearGradient(cx - 30, 0, cx + 30, 0);
-      tg.addColorStop(0, skin(0.30));
-      tg.addColorStop(0.42, skin(0.88));
-      tg.addColorStop(0.6, skin(0.72));
-      tg.addColorStop(1, skin(0.26));
-      g.fillStyle = tg;
-      g.beginPath();
-      g.moveTo(cx - 21, h * 0.245);            // плечи
-      g.bezierCurveTo(cx - 30, h * 0.30, cx - 24, h * 0.38, cx - 16, h * 0.44); // рёбра
-      g.bezierCurveTo(cx - 12, h * 0.48, cx - 15, h * 0.52, cx - 15, h * 0.55); // впалый живот
-      g.lineTo(cx + 15, h * 0.55);
-      g.bezierCurveTo(cx + 15, h * 0.52, cx + 12, h * 0.48, cx + 16, h * 0.44);
-      g.bezierCurveTo(cx + 24, h * 0.38, cx + 30, h * 0.30, cx + 21, h * 0.245);
-      g.closePath();
-      g.fill();
-      // рёбра — тёмные дуги с подсветкой снизу
-      for (let i = 0; i < 5; i++) {
-        const yy = h * (0.30 + i * 0.032);
-        g.strokeStyle = 'rgba(40,34,32,0.55)';
-        g.lineWidth = 3;
-        g.beginPath();
-        g.moveTo(cx - 17 + i, yy);
-        g.quadraticCurveTo(cx, yy + 7, cx + 17 - i, yy);
-        g.stroke();
-        g.strokeStyle = 'rgba(210,205,195,0.25)';
-        g.lineWidth = 1.4;
-        g.beginPath();
-        g.moveTo(cx - 16 + i, yy + 3);
-        g.quadraticCurveTo(cx, yy + 10, cx + 16 - i, yy + 3);
-        g.stroke();
-      }
-      // впадина живота
-      g.fillStyle = 'rgba(30,26,26,0.5)';
-      g.beginPath();
-      g.ellipse(cx, h * 0.50, 9, 14, 0, 0, 7);
-      g.fill();
-      // грязь и раны на торсе
-      g.fillStyle = 'rgba(70,20,16,0.55)';
-      g.beginPath(); g.ellipse(cx - 10, h * 0.35, 4, 9, 0.5, 0, 7); g.fill();
-      g.fillStyle = 'rgba(52,40,30,0.5)';
-      g.beginPath(); g.ellipse(cx + 12, h * 0.47, 6, 4, 0.3, 0, 7); g.fill();
-
-      // --- таз/бёдра прикрыты истлевшей тканью ---
-      g.fillStyle = 'rgba(58,54,48,0.9)';
-      g.beginPath();
-      g.moveTo(cx - 17, h * 0.545);
-      g.lineTo(cx + 17, h * 0.545);
-      g.lineTo(cx + 13, h * 0.62 + (kind === 'walkA' ? 4 : 0));
-      g.lineTo(cx + 2, h * 0.60);
-      g.lineTo(cx - 10, h * 0.635);
-      g.closePath();
-      g.fill();
-
-      // --- руки: до колен, вывернутые ---
+      // --- НОГИ: слишком длинные, колени вывернуты внутрь ---
       for (const side of [-1, 1]) {
-        const shX = cx + side * 20;
-        const grad = g.createLinearGradient(shX - 8, 0, shX + 8, 0);
-        grad.addColorStop(0, skin(0.3));
-        grad.addColorStop(0.5, skin(0.78));
-        grad.addColorStop(1, skin(0.28));
-        g.strokeStyle = grad;
-        g.lineCap = 'round';
-        if (armReach) {
-          // обе руки тянутся В КАМЕРУ: укорочены перспективой, кисти огромные
-          g.lineWidth = 15;
+        const sw = side * legPhase;            // фаза шага
+        const hipX = cx + side * 26;
+        const kneeX = cx + side * 13 + sw * 6;
+        const ankleX = cx + side * 22 + sw * 26;
+        // бедро → голень: бедро мясистее, голень истончается до кости
+        limb(
+          [[hipX, h * 0.545], [(hipX + kneeX) / 2, h * 0.625], [kneeX, h * 0.70],
+            [(kneeX + ankleX) / 2, h * 0.82], [ankleX, h * 0.955]],
+          [32, 26, 17, 13, 9],
+          side < 0 ? 0.62 : 0.42
+        );
+        // коленная чашечка — костяной бугор
+        const kg = g.createRadialGradient(kneeX - 3, h * 0.70 - 3, 1, kneeX, h * 0.70, 15);
+        kg.addColorStop(0, SK.wet);
+        kg.addColorStop(0.5, SK.base);
+        kg.addColorStop(1, 'rgba(120,112,100,0)');
+        g.fillStyle = kg;
+        g.beginPath(); g.ellipse(kneeX, h * 0.70, 14, 17, 0, 0, 7); g.fill();
+        // тень под коленом
+        g.fillStyle = 'rgba(20,16,14,0.45)';
+        g.beginPath(); g.ellipse(kneeX, h * 0.725, 12, 7, 0, 0, 7); g.fill();
+        // вены на голени
+        g.strokeStyle = 'rgba(70,60,80,0.35)';
+        g.lineWidth = 1.6;
+        for (let i = 0; i < 2; i++) {
           g.beginPath();
-          g.moveTo(shX, h * 0.27);
-          g.quadraticCurveTo(shX + side * 14, h * 0.33, shX + side * 8, h * 0.40);
+          g.moveTo(kneeX + (i ? 5 : -4), h * 0.73);
+          g.quadraticCurveTo(ankleX + (i ? 7 : -6), h * 0.82, ankleX + (i ? 2 : -3), h * 0.93);
           g.stroke();
-          // гигантская кисть
-          const hx = shX + side * 8, hy = h * 0.435;
-          g.fillStyle = skin(0.85);
-          g.beginPath(); g.ellipse(hx, hy, 17, 13, 0, 0, 7); g.fill();
-          g.strokeStyle = skin(0.75);
-          g.lineWidth = 5.5;
-          for (let f = 0; f < 5; f++) {
-            const fa = (f - 2) * 0.42 + (side > 0 ? 0.2 : -0.2);
-            g.beginPath();
-            g.moveTo(hx, hy);
-            g.quadraticCurveTo(hx + Math.sin(fa) * 20, hy + 18, hx + Math.sin(fa) * 30, hy + 30);
-            g.stroke();
-          }
-          // тёмные ногти
-          g.fillStyle = 'rgba(35,28,24,0.95)';
-          for (let f = 0; f < 5; f++) {
-            const fa = (f - 2) * 0.42 + (side > 0 ? 0.2 : -0.2);
-            g.beginPath();
-            g.ellipse(hx + Math.sin(fa) * 30, hy + 31, 3, 5, fa, 0, 7);
-            g.fill();
-          }
-        } else {
-          const sway = kind === 'walkA' ? side * 6 : kind === 'walkB' ? -side * 6 : 0;
-          const tw = kind === 'twitch' ? side * 10 : 0;
-          g.lineWidth = 10;
-          g.beginPath();
-          g.moveTo(shX, h * 0.265);
-          g.quadraticCurveTo(shX + side * 16 + sway, h * 0.42, shX + side * 8 + sway + tw, h * 0.56);
-          g.quadraticCurveTo(shX + side * 6 + sway + tw, h * 0.63, shX + side * 10 + sway + tw, h * 0.70);
-          g.stroke();
-          // кисть с длинными пальцами до бёдер
-          const hx = shX + side * 10 + sway + tw, hy = h * 0.705;
-          g.strokeStyle = skin(0.6);
-          g.lineWidth = 3.2;
-          for (let f = 0; f < 5; f++) {
-            g.beginPath();
-            g.moveTo(hx, hy);
-            g.lineTo(hx + side * (f - 2) * 3 + side * 2, hy + 26 + (f % 3) * 6);
-            g.stroke();
-          }
+        }
+        // ступня: длинная, с пальцами
+        const fx = ankleX + side * 4, fy = h * 0.962;
+        const fg2 = g.createLinearGradient(fx, fy - 8, fx, fy + 10);
+        fg2.addColorStop(0, SK.base);
+        fg2.addColorStop(1, SK.dark);
+        g.fillStyle = fg2;
+        g.beginPath();
+        g.ellipse(fx + side * 8, fy + 8, 22, 9, side * 0.06, 0, 7);
+        g.fill();
+        // пальцы с чёрными ногтями
+        for (let i = 0; i < 5; i++) {
+          const tx = fx + side * (14 + i * 4), ty = fy + 12 + Math.abs(i - 2) * 1.5;
+          g.fillStyle = SK.mid;
+          g.beginPath(); g.ellipse(tx, ty, 4, 3, 0, 0, 7); g.fill();
+          g.fillStyle = 'rgba(28,22,18,0.95)';
+          g.beginPath(); g.ellipse(tx + side * 2.5, ty, 2, 2, 0, 0, 7); g.fill();
         }
       }
 
-      // --- шея и свёрнутая набок голова ---
-      g.strokeStyle = skin(0.7);
-      g.lineWidth = 9;
+      // --- ТАЗ: выпирающие подвздошные кости ---
+      const pg = g.createLinearGradient(cx - 40, 0, cx + 40, 0);
+      pg.addColorStop(0, SK.deep);
+      pg.addColorStop(0.3, SK.dark);
+      pg.addColorStop(0.5, SK.base);
+      pg.addColorStop(0.72, SK.mid);
+      pg.addColorStop(1, SK.deep);
+      g.fillStyle = pg;
       g.beginPath();
-      g.moveTo(cx, h * 0.245);
-      g.lineTo(cx + (kind === 'twitch' ? -7 : 5), h * 0.19);
-      g.stroke();
-      g.save();
-      g.translate(cx + (kind === 'twitch' ? -8 : 6), h * 0.155);
-      g.rotate(headTilt);
-      // череп, обтянутый кожей
-      const hg = g.createRadialGradient(-6, -8, 4, 0, 0, 30);
-      hg.addColorStop(0, skin(1.0));
-      hg.addColorStop(0.75, skin(0.72));
-      hg.addColorStop(1, skin(0.4));
-      g.fillStyle = hg;
-      g.beginPath();
-      g.moveTo(0, -26);
-      g.bezierCurveTo(17, -25, 21, -8, 17, 6);   // скулы
-      g.bezierCurveTo(14, 18, 8, 30, 0, 34);     // отвисшая челюсть
-      g.bezierCurveTo(-8, 30, -14, 18, -17, 6);
-      g.bezierCurveTo(-21, -8, -17, -25, 0, -26);
-      g.fill();
-      // редкие пряди волос
-      g.strokeStyle = 'rgba(30,26,22,0.85)';
-      g.lineWidth = 1.6;
-      for (let i = 0; i < 9; i++) {
-        const a = -2.4 + i * 0.34;
+      g.moveTo(cx - 30, h * 0.455);
+      g.bezierCurveTo(cx - 40, h * 0.50, cx - 34, h * 0.53, cx - 27, h * 0.565);
+      g.lineTo(cx + 27, h * 0.565);
+      g.bezierCurveTo(cx + 34, h * 0.53, cx + 40, h * 0.50, cx + 30, h * 0.455);
+      g.closePath(); g.fill();
+      // гребни подвздошных костей — блик сверху, тень снизу
+      for (const side of [-1, 1]) {
+        g.strokeStyle = 'rgba(232,226,212,0.35)';
+        g.lineWidth = 3;
         g.beginPath();
-        g.moveTo(Math.cos(a) * 16, -14 + Math.sin(a) * 10);
-        g.quadraticCurveTo(Math.cos(a) * 26, -4, Math.cos(a) * 24 + 4, 14 + (i % 3) * 8);
+        g.moveTo(cx + side * 12, h * 0.478);
+        g.quadraticCurveTo(cx + side * 30, h * 0.482, cx + side * 35, h * 0.508);
+        g.stroke();
+        g.strokeStyle = 'rgba(18,14,12,0.5)';
+        g.lineWidth = 4;
+        g.beginPath();
+        g.moveTo(cx + side * 12, h * 0.488);
+        g.quadraticCurveTo(cx + side * 30, h * 0.492, cx + side * 35, h * 0.518);
         g.stroke();
       }
-      // чёрные провалы глаз (красные точки дорисует слой глаз)
+
+      // --- ТОРС: рёбра наружу, живот провален ---
+      const tg = g.createLinearGradient(cx - 62, 0, cx + 62, 0);
+      tg.addColorStop(0, SK.deep);
+      tg.addColorStop(0.14, SK.dark);
+      tg.addColorStop(0.4, SK.base);
+      tg.addColorStop(0.52, SK.lit);
+      tg.addColorStop(0.74, SK.mid);
+      tg.addColorStop(1, SK.deep);
+      g.fillStyle = tg;
+      g.beginPath();
+      g.moveTo(cx - 47, h * 0.262);                                    // левое плечо
+      g.bezierCurveTo(cx - 62, h * 0.30, cx - 58, h * 0.36, cx - 45, h * 0.405); // грудная клетка
+      g.bezierCurveTo(cx - 34, h * 0.44, cx - 30, h * 0.47, cx - 31, h * 0.50);  // талия (впалая)
+      g.lineTo(cx + 31, h * 0.50);
+      g.bezierCurveTo(cx + 30, h * 0.47, cx + 34, h * 0.44, cx + 45, h * 0.405);
+      g.bezierCurveTo(cx + 58, h * 0.36, cx + 62, h * 0.30, cx + 47, h * 0.262);
+      g.closePath(); g.fill();
+
+      // ключицы
+      for (const side of [-1, 1]) {
+        g.strokeStyle = 'rgba(238,232,218,0.4)';
+        g.lineWidth = 4;
+        g.beginPath();
+        g.moveTo(cx + side * 4, h * 0.278);
+        g.quadraticCurveTo(cx + side * 26, h * 0.272, cx + side * 43, h * 0.285);
+        g.stroke();
+        g.strokeStyle = 'rgba(16,12,10,0.55)';
+        g.lineWidth = 5;
+        g.beginPath();
+        g.moveTo(cx + side * 4, h * 0.289);
+        g.quadraticCurveTo(cx + side * 26, h * 0.283, cx + side * 43, h * 0.296);
+        g.stroke();
+      }
+      // ямка между ключицами
+      g.fillStyle = 'rgba(12,10,9,0.6)';
+      g.beginPath(); g.ellipse(cx, h * 0.272, 7, 5, 0, 0, 7); g.fill();
+
+      // рёбра: 6 пар, тень сверху + блик снизу
+      for (let i = 0; i < 6; i++) {
+        const yy = h * (0.305 + i * 0.023);
+        const sp = 46 - i * 2.5;
+        g.strokeStyle = 'rgba(14,11,10,0.5)';
+        g.lineWidth = 5;
+        g.beginPath();
+        g.moveTo(cx - sp + 6, yy);
+        g.quadraticCurveTo(cx, yy + 13, cx + sp - 6, yy);
+        g.stroke();
+        g.strokeStyle = 'rgba(228,220,204,0.28)';
+        g.lineWidth = 2.6;
+        g.beginPath();
+        g.moveTo(cx - sp + 7, yy + 4);
+        g.quadraticCurveTo(cx, yy + 16.5, cx + sp - 7, yy + 4);
+        g.stroke();
+      }
+      // грудина
+      g.strokeStyle = 'rgba(226,218,202,0.22)';
+      g.lineWidth = 5;
+      g.beginPath();
+      g.moveTo(cx, h * 0.295); g.lineTo(cx, h * 0.415);
+      g.stroke();
+
+      // провал живота
+      const bg = g.createRadialGradient(cx, h * 0.455, 4, cx, h * 0.458, 40);
+      bg.addColorStop(0, 'rgba(10,8,7,0.72)');
+      bg.addColorStop(0.6, 'rgba(24,20,17,0.4)');
+      bg.addColorStop(1, 'rgba(30,26,22,0)');
+      g.fillStyle = bg;
+      g.beginPath(); g.ellipse(cx, h * 0.457, 26, 34, 0, 0, 7); g.fill();
+
+      // --- Y-образный секционный разрез со скобами ---
+      const inc = [[cx - 34, h * 0.288], [cx - 6, h * 0.372], [cx, h * 0.392],
+        [cx + 6, h * 0.372], [cx + 34, h * 0.288]];
+      g.strokeStyle = 'rgba(52,10,8,0.9)';
+      g.lineWidth = 5;
+      g.beginPath();
+      g.moveTo(inc[0][0], inc[0][1]);
+      g.lineTo(inc[1][0], inc[1][1]);
+      g.moveTo(inc[4][0], inc[4][1]);
+      g.lineTo(inc[3][0], inc[3][1]);
+      g.moveTo(cx, h * 0.378); g.lineTo(cx + 2, h * 0.50);
+      g.stroke();
+      // тёмная щель внутри разреза
+      g.strokeStyle = 'rgba(20,4,4,0.95)';
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(inc[0][0], inc[0][1]); g.lineTo(inc[1][0], inc[1][1]);
+      g.moveTo(inc[4][0], inc[4][1]); g.lineTo(inc[3][0], inc[3][1]);
+      g.moveTo(cx, h * 0.378); g.lineTo(cx + 2, h * 0.50);
+      g.stroke();
+      // металлические скобы поперёк
+      g.strokeStyle = 'rgba(196,192,184,0.85)';
+      g.lineWidth = 2.4;
+      const staple = (x0, y0, x1, y1, n) => {
+        for (let i = 0; i <= n; i++) {
+          const k = i / n;
+          const px = x0 + (x1 - x0) * k, py = y0 + (y1 - y0) * k;
+          const a = Math.atan2(y1 - y0, x1 - x0) + Math.PI / 2;
+          g.beginPath();
+          g.moveTo(px + Math.cos(a) * 6, py + Math.sin(a) * 6);
+          g.lineTo(px - Math.cos(a) * 6, py - Math.sin(a) * 6);
+          g.stroke();
+        }
+      };
+      staple(inc[0][0], inc[0][1], inc[1][0], inc[1][1], 5);
+      staple(inc[4][0], inc[4][1], inc[3][0], inc[3][1], 5);
+      staple(cx, h * 0.378, cx + 2, h * 0.50, 7);
+
+      // трупные пятна и синяки
+      g.globalAlpha = 0.4;
+      for (const [bx, by, br] of [[-30, 0.34, 15], [26, 0.42, 12], [-18, 0.48, 10], [34, 0.31, 9]]) {
+        const bgr = g.createRadialGradient(cx + bx, h * by, 1, cx + bx, h * by, br);
+        bgr.addColorStop(0, SK.bruise);
+        bgr.addColorStop(1, 'rgba(74,58,78,0)');
+        g.fillStyle = bgr;
+        g.beginPath(); g.arc(cx + bx, h * by, br, 0, 7); g.fill();
+      }
+      g.globalAlpha = 1;
+
+      // --- ОБРЫВКИ БОЛЬНИЧНОЙ РУБАХИ на бёдрах ---
+      g.fillStyle = 'rgba(96,98,92,0.92)';
+      g.beginPath();
+      g.moveTo(cx - 33, h * 0.495);
+      g.lineTo(cx + 33, h * 0.495);
+      g.lineTo(cx + 27, h * 0.585);
+      g.lineTo(cx + 12, h * 0.556);
+      g.lineTo(cx - 2, h * 0.60);
+      g.lineTo(cx - 16, h * 0.552);
+      g.lineTo(cx - 28, h * 0.58);
+      g.closePath(); g.fill();
+      // тень и грязь на ткани
+      g.fillStyle = 'rgba(20,18,14,0.4)';
+      g.fillRect(cx - 33, h * 0.495, 66, 8);
+      g.fillStyle = 'rgba(70,16,12,0.45)';
+      g.beginPath(); g.ellipse(cx + 8, h * 0.53, 14, 9, 0.2, 0, 7); g.fill();
+
+      // --- РУКИ ---
+      for (const side of [-1, 1]) {
+        const shX = cx + side * 44, shY = h * 0.285;
+        if (reach) {
+          // тянется в камеру: предплечье укорочено, кисть огромная
+          limb([[shX, shY], [shX + side * 26, h * 0.345], [shX + side * 16, h * 0.415]],
+            [19, 16, 15], side < 0 ? 0.6 : 0.4);
+          const hx = shX + side * 20, hy = h * 0.475;
+          // пальцы рисуем ПЕРВЫМИ — ладонь ляжет поверх их оснований
+          for (let f = 0; f < 5; f++) {
+            const fa = (f - 2) * 0.30 + side * 0.30;   // веер пальцев
+            const len = f === 2 ? 78 : f === 0 || f === 4 ? 56 : 68;
+            const dirX2 = Math.sin(fa), dirY2 = Math.cos(fa * 0.5);
+            const midX = hx + dirX2 * len * 0.55, midY = hy + dirY2 * len * 0.5;
+            const tipX = hx + dirX2 * len, tipY = hy + dirY2 * len;
+            limb([[hx + dirX2 * 12, hy + dirY2 * 10], [midX, midY], [tipX, tipY]],
+              [10, 7.5, 4.6], 0.42);
+            // тёмный зазор между пальцами
+            g.strokeStyle = 'rgba(6,5,5,0.7)';
+            g.lineWidth = 2.6;
+            g.beginPath();
+            g.moveTo(hx + dirX2 * 14, hy + dirY2 * 12);
+            g.lineTo(tipX, tipY);
+            g.stroke();
+            // костяшка сустава
+            g.fillStyle = 'rgba(228,220,202,0.2)';
+            g.beginPath(); g.ellipse(midX, midY, 7, 6, fa, 0, 7); g.fill();
+            // чёрный загнутый ноготь
+            g.fillStyle = 'rgba(20,15,13,0.96)';
+            g.beginPath(); g.ellipse(tipX + dirX2 * 3, tipY + 4, 4.2, 6.5, fa, 0, 7); g.fill();
+          }
+          // ладонь: угловатая, с костяшками
+          const hgr = g.createRadialGradient(hx - side * 8, hy - 10, 3, hx, hy + 4, 40);
+          hgr.addColorStop(0, SK.lit);
+          hgr.addColorStop(0.4, SK.base);
+          hgr.addColorStop(0.8, SK.mid);
+          hgr.addColorStop(1, SK.deep);
+          g.fillStyle = hgr;
+          g.beginPath();
+          g.moveTo(hx - 26, hy - 16);
+          g.lineTo(hx + 26, hy - 12);
+          g.quadraticCurveTo(hx + 30, hy + 14, hx + 16, hy + 22);
+          g.lineTo(hx - 18, hy + 20);
+          g.quadraticCurveTo(hx - 30, hy + 6, hx - 26, hy - 16);
+          g.closePath(); g.fill();
+          // сухожилия на тыльной стороне
+          g.strokeStyle = 'rgba(214,206,188,0.18)';
+          g.lineWidth = 2.4;
+          for (let f = -2; f <= 2; f++) {
+            g.beginPath();
+            g.moveTo(hx + f * 9, hy - 12);
+            g.lineTo(hx + f * 11, hy + 16);
+            g.stroke();
+          }
+          // кисть тонет в тени: она ближе всего к камере, но фонарь бьёт
+          // мимо неё — иначе пальцы читаются как белый веер
+          g.save();
+          g.globalCompositeOperation = 'source-atop';
+          const shg = g.createRadialGradient(hx, hy, 12, hx, hy + 46, 95);
+          shg.addColorStop(0, 'rgba(10,9,8,0.10)');
+          shg.addColorStop(0.55, 'rgba(8,7,6,0.42)');
+          shg.addColorStop(1, 'rgba(5,4,4,0.72)');
+          g.fillStyle = shg;
+          g.fillRect(hx - 110, hy - 40, 220, 180);
+          g.restore();
+        } else {
+          const sway = legPhase * side * 10;
+          const tw = twitch ? side * 18 : 0;
+          const elbX = shX + side * 20 + sway;
+          const wrX = shX + side * 12 + sway + tw;
+          limb([[shX, shY], [elbX, h * 0.40], [wrX, h * 0.545], [wrX + side * 4, h * 0.615]],
+            [18, 13, 10, 9], side < 0 ? 0.6 : 0.4);
+          // локтевой отросток
+          g.fillStyle = 'rgba(230,224,208,0.25)';
+          g.beginPath(); g.ellipse(elbX + side * 8, h * 0.40, 8, 11, 0, 0, 7); g.fill();
+          // кисть с длинными пальцами
+          const hx = wrX + side * 5, hy = h * 0.625;
+          g.fillStyle = SK.mid;
+          g.beginPath(); g.ellipse(hx, hy, 13, 15, 0, 0, 7); g.fill();
+          for (let f = 0; f < 5; f++) {
+            const off = (f - 2) * 5;
+            limb([[hx + off * 0.7, hy + 8], [hx + off, hy + 34], [hx + off * 1.1 + side * 2, hy + 52 + Math.abs(f - 2) * -5]],
+              [4.5, 3.6, 2.6], 0.5);
+            g.fillStyle = 'rgba(24,18,16,0.95)';
+            g.beginPath();
+            g.ellipse(hx + off * 1.1 + side * 2, hy + 54 + Math.abs(f - 2) * -5, 2.6, 4, 0, 0, 7);
+            g.fill();
+          }
+        }
+        // дельтовидная мышца поверх сустава — иначе плечо выглядит «коробкой»
+        const dg = g.createRadialGradient(shX - side * 7, shY - 8, 2, shX, shY + 2, 32);
+        dg.addColorStop(0, SK.lit);
+        dg.addColorStop(0.4, SK.base);
+        dg.addColorStop(0.75, SK.mid);
+        dg.addColorStop(1, 'rgba(11,10,9,0)');
+        g.fillStyle = dg;
+        g.beginPath(); g.ellipse(shX, shY + 6, 22, 27, side * 0.18, 0, 7); g.fill();
+        // кость лопатки под кожей
+        g.strokeStyle = 'rgba(226,218,200,0.22)';
+        g.lineWidth = 3;
+        g.beginPath();
+        g.moveTo(shX - side * 12, shY - 4);
+        g.quadraticCurveTo(shX + side * 6, shY - 10, shX + side * 16, shY + 6);
+        g.stroke();
+
+        // кожаный ремень-фиксатор на запястье (разорванный)
+        const cuffY = reach ? h * 0.425 : h * 0.585;
+        const cuffX = reach ? shX + side * 15 : shX + side * 12 + legPhase * side * 10 + (twitch ? side * 18 : 0);
+        g.fillStyle = 'rgba(48,34,24,0.95)';
+        g.fillRect(cuffX - 13, cuffY, 26, 11);
+        g.fillStyle = 'rgba(28,20,14,0.9)';
+        g.fillRect(cuffX - 13, cuffY + 7, 26, 4);
+        g.strokeStyle = 'rgba(150,140,120,0.5)';
+        g.lineWidth = 1.5;
+        g.beginPath(); g.moveTo(cuffX + 2, cuffY + 2); g.lineTo(cuffX + 2, cuffY + 9); g.stroke();
+        // оборванный ремешок свисает
+        g.strokeStyle = 'rgba(48,34,24,0.9)';
+        g.lineWidth = 5;
+        g.beginPath();
+        g.moveTo(cuffX + side * 10, cuffY + 8);
+        g.quadraticCurveTo(cuffX + side * 20, cuffY + 26, cuffX + side * 14, cuffY + 44);
+        g.stroke();
+      }
+
+      // капельница, всё ещё в вене левой руки
+      if (!reach) {
+        const ivX = cx - 56 + legPhase * -10;
+        g.strokeStyle = 'rgba(190,190,180,0.45)';
+        g.lineWidth = 2.5;
+        g.beginPath();
+        g.moveTo(ivX, h * 0.42);
+        g.quadraticCurveTo(ivX - 24, h * 0.52, ivX - 12, h * 0.64);
+        g.stroke();
+        g.fillStyle = 'rgba(120,26,20,0.7)';
+        g.beginPath(); g.arc(ivX - 12, h * 0.645, 4, 0, 7); g.fill();
+      }
+
+      // --- ШЕЯ: натянутые сухожилия ---
+      const neckX = cx + (twitch ? -14 : 10);
+      limb([[cx, h * 0.278], [neckX, h * 0.232], [neckX + (twitch ? -4 : 3), h * 0.208]],
+        [25, 21, 18], 0.45);
+      g.strokeStyle = 'rgba(238,230,214,0.3)';
+      g.lineWidth = 3;
+      g.beginPath();
+      g.moveTo(cx - 8, h * 0.268);
+      g.quadraticCurveTo(neckX - 6, h * 0.235, neckX - 2, h * 0.205);
+      g.moveTo(cx + 9, h * 0.268);
+      g.quadraticCurveTo(neckX + 7, h * 0.235, neckX + 5, h * 0.205);
+      g.stroke();
+      // тень под подбородком
+      g.fillStyle = 'rgba(12,10,9,0.6)';
+      g.beginPath(); g.ellipse(neckX, h * 0.208, 15, 8, 0, 0, 7); g.fill();
+
+      // --- ГОЛОВА ---
+      g.save();
+      g.translate(neckX + 2, h * 0.174);
+      g.rotate(headTilt);
+      const HS = 1.32;   // череп крупнее туловища — детская пропорция «неправильности»
+      g.scale(HS, HS);
+
+      // череп, обтянутый кожей
+      const skg = g.createRadialGradient(-14, -20, 6, 0, -2, 62);
+      skg.addColorStop(0, SK.wet);
+      skg.addColorStop(0.35, SK.lit);
+      skg.addColorStop(0.62, SK.base);
+      skg.addColorStop(0.85, SK.mid);
+      skg.addColorStop(1, SK.deep);
+      g.fillStyle = skg;
+      g.beginPath();
+      g.moveTo(0, -54);
+      g.bezierCurveTo(28, -53, 38, -36, 37, -14);       // височная кость
+      g.bezierCurveTo(36, -2, 31, 6, 26, 12);           // скула
+      g.bezierCurveTo(23, 30, 15, 52, 0, 62);           // челюсть, вытянутая вниз
+      g.bezierCurveTo(-15, 52, -23, 30, -26, 12);
+      g.bezierCurveTo(-31, 6, -36, -2, -37, -14);
+      g.bezierCurveTo(-38, -36, -28, -53, 0, -54);
+      g.closePath();
+      g.fill();
+
+      // фото-лицо пользователя (если положил файл в public/monster)
+      if (monsterFaceImg && monsterFaceImg.complete && monsterFaceImg.naturalWidth) {
+        g.save();
+        g.beginPath();
+        g.ellipse(0, 0, 34, 52, 0, 0, 7);
+        g.clip();
+        const iw = monsterFaceImg.naturalWidth, ih = monsterFaceImg.naturalHeight;
+        const sc = Math.max(68 / iw, 104 / ih) * 1.12;
+        g.globalAlpha = 0.92;
+        g.drawImage(monsterFaceImg, -iw * sc / 2, -ih * sc / 2 - 4, iw * sc, ih * sc);
+        // обесцветить под мертвенный тон
+        g.globalCompositeOperation = 'saturation';
+        g.fillStyle = '#808080';
+        g.fillRect(-40, -60, 80, 120);
+        g.globalCompositeOperation = 'multiply';
+        g.fillStyle = 'rgba(168,160,148,0.75)';
+        g.fillRect(-40, -60, 80, 120);
+        g.restore();
+        g.globalAlpha = 1;
+      }
+
+      // надбровные дуги: тень сверху, блик по кромке
+      g.fillStyle = 'rgba(14,11,10,0.55)';
+      g.beginPath();
+      g.moveTo(-30, -22);
+      g.quadraticCurveTo(0, -30, 30, -22);
+      g.quadraticCurveTo(0, -14, -30, -22);
+      g.fill();
+      g.strokeStyle = 'rgba(240,234,220,0.3)';
+      g.lineWidth = 2.4;
+      g.beginPath();
+      g.moveTo(-29, -25);
+      g.quadraticCurveTo(0, -33, 29, -25);
+      g.stroke();
+
+      // глазницы: глубокие провалы
       for (const sx of [-1, 1]) {
-        g.fillStyle = '#0a0708';
+        const ex = sx * 16, ey = -8;
+        const eg = g.createRadialGradient(ex, ey - 3, 2, ex, ey, 18);
+        eg.addColorStop(0, '#000000');
+        eg.addColorStop(0.55, '#080606');
+        eg.addColorStop(1, 'rgba(28,22,20,0)');
+        g.fillStyle = eg;
+        g.beginPath(); g.ellipse(ex, ey, 15, 17, sx * 0.12, 0, 7); g.fill();
+        g.fillStyle = '#050404';
+        g.beginPath(); g.ellipse(ex, ey, 10.5, 13, sx * 0.12, 0, 7); g.fill();
+        // тёмный ободок вокруг — синяки
+        g.strokeStyle = 'rgba(60,34,44,0.5)';
+        g.lineWidth = 5;
+        g.beginPath(); g.ellipse(ex, ey, 13, 15, sx * 0.12, 0, 7); g.stroke();
+      }
+      // скуловые дуги — блик
+      g.strokeStyle = 'rgba(236,228,212,0.34)';
+      g.lineWidth = 4;
+      for (const sx of [-1, 1]) {
         g.beginPath();
-        g.ellipse(sx * 8, -8, 5.5, 8, sx * 0.15, 0, 7);
-        g.fill();
-        g.fillStyle = 'rgba(60,20,20,0.55)'; // синяки вокруг
-        g.beginPath();
-        g.ellipse(sx * 8, -6, 8, 11, sx * 0.15, 0, 7);
-        g.fill();
-        g.fillStyle = '#0a0708';
-        g.beginPath();
-        g.ellipse(sx * 8, -8, 5.5, 8, sx * 0.15, 0, 7);
-        g.fill();
+        g.moveTo(sx * 33, -8);
+        g.quadraticCurveTo(sx * 27, 6, sx * 15, 12);
+        g.stroke();
+      }
+      // впалые щёки
+      for (const sx of [-1, 1]) {
+        const cg = g.createRadialGradient(sx * 20, 20, 2, sx * 20, 20, 20);
+        cg.addColorStop(0, 'rgba(10,8,7,0.55)');
+        cg.addColorStop(1, 'rgba(20,16,14,0)');
+        g.fillStyle = cg;
+        g.beginPath(); g.ellipse(sx * 20, 20, 13, 18, 0, 0, 7); g.fill();
       }
       // провал носа
-      g.fillStyle = 'rgba(20,14,14,0.9)';
+      g.fillStyle = 'rgba(8,6,6,0.95)';
       g.beginPath();
-      g.moveTo(-2.5, 2); g.lineTo(2.5, 2); g.lineTo(0, 8);
+      g.moveTo(-5, 8); g.lineTo(5, 8);
+      g.lineTo(0, 20);
       g.closePath(); g.fill();
-      // разинутый чёрный рот — слишком широкий, с зубами
-      g.fillStyle = '#0c0506';
+      g.strokeStyle = 'rgba(230,222,206,0.2)';
+      g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(0, -6); g.lineTo(0, 7); g.stroke();
+
+      // рот: отвисшая челюсть + зашитые уголки (улыбка до ушей)
+      const mouthOpen = reach ? 26 : twitch ? 20 : 15;
+      g.fillStyle = '#0a0505';
       g.beginPath();
-      g.ellipse(0, 21, 9, 11 + (kind === 'reach' ? 4 : 0), 0, 0, 7);
+      g.ellipse(0, 38, 17, mouthOpen, 0, 0, 7);
       g.fill();
-      g.fillStyle = 'rgba(205,198,180,0.9)';
-      for (let i = -2; i <= 2; i++) {
+      // зубы
+      g.fillStyle = 'rgba(206,198,178,0.92)';
+      for (let i = -3; i <= 3; i++) {
         g.beginPath();
-        g.moveTo(i * 3.4 - 1.4, 12.5);
-        g.lineTo(i * 3.4 + 1.4, 12.5);
-        g.lineTo(i * 3.4, 17.5);
+        g.moveTo(i * 5 - 2.2, 38 - mouthOpen + 2);
+        g.lineTo(i * 5 + 2.2, 38 - mouthOpen + 2);
+        g.lineTo(i * 5, 38 - mouthOpen + 11);
         g.closePath(); g.fill();
       }
-      // трещины кожи от рта
-      g.strokeStyle = 'rgba(50,30,28,0.7)';
-      g.lineWidth = 1.2;
+      for (let i = -2; i <= 2; i++) {
+        g.beginPath();
+        g.moveTo(i * 6 - 2.4, 38 + mouthOpen - 2);
+        g.lineTo(i * 6 + 2.4, 38 + mouthOpen - 2);
+        g.lineTo(i * 6, 38 + mouthOpen - 10);
+        g.closePath(); g.fill();
+      }
+      // разрезы от уголков рта, стянутые нитками
+      for (const sx of [-1, 1]) {
+        g.strokeStyle = 'rgba(58,10,8,0.85)';
+        g.lineWidth = 3;
+        g.beginPath();
+        g.moveTo(sx * 15, 36);
+        g.quadraticCurveTo(sx * 24, 30, sx * 29, 22);
+        g.stroke();
+        g.strokeStyle = 'rgba(20,16,14,0.9)';
+        g.lineWidth = 1.4;
+        for (let i = 0; i < 4; i++) {
+          const k = i / 3;
+          const px = sx * (15 + 14 * k), py = 36 - 14 * k;
+          g.beginPath();
+          g.moveTo(px - sx * 3, py - 4);
+          g.lineTo(px + sx * 3, py + 4);
+          g.stroke();
+        }
+      }
+      // редкие мокрые пряди волос
+      g.strokeStyle = 'rgba(26,22,19,0.9)';
+      g.lineCap = 'round';
+      for (let i = 0; i < 14; i++) {
+        const a = -2.5 + i * 0.22;
+        const rx = Math.cos(a) * 33, ry = -30 + Math.sin(a) * 20;
+        g.lineWidth = 1.4 + (i % 3) * 0.9;
+        g.beginPath();
+        g.moveTo(rx * 0.7, ry);
+        g.quadraticCurveTo(rx * 1.25, ry + 26, rx * 1.05 + (i % 2 ? 6 : -6), ry + 58 + (i % 4) * 12);
+        g.stroke();
+      }
+      // мокрый блик на лбу
+      g.fillStyle = 'rgba(255,250,238,0.16)';
+      g.beginPath(); g.ellipse(-10, -34, 13, 8, -0.4, 0, 7); g.fill();
+      // больничный браслет на... нет, это голова. Просто потёк.
+      g.strokeStyle = 'rgba(74,12,10,0.55)';
+      g.lineWidth = 2.5;
       g.beginPath();
-      g.moveTo(-8, 18); g.lineTo(-14, 13);
-      g.moveTo(8, 18); g.lineTo(14, 12);
+      g.moveTo(-20, 4); g.lineTo(-23, 26);
       g.stroke();
       g.restore();
 
-      // --- потёки крови по телу вниз от шеи ---
-      g.strokeStyle = 'rgba(88,16,12,0.6)';
-      g.lineWidth = 3;
-      g.beginPath();
-      g.moveTo(cx + 3, h * 0.24);
-      g.lineTo(cx + 5, h * 0.33);
-      g.moveTo(cx - 6, h * 0.25);
-      g.lineTo(cx - 8, h * 0.30);
-      g.stroke();
+      // --- КОЖА: мраморная пятнистость и вены ---
+      // ровный градиент читается как пластик; пятна и прожилки —
+      // как органика. source-atop, чтобы не залезть на фон.
+      g.globalCompositeOperation = 'source-atop';
+      for (let i = 0; i < 200; i++) {
+        const bx = Math.random() * w;
+        const by = h * 0.12 + Math.random() * h * 0.84;
+        const br = 3 + Math.random() * 18;
+        g.fillStyle = Math.random() < 0.56
+          ? `rgba(9,7,6,${(0.05 + Math.random() * 0.14).toFixed(3)})`
+          : `rgba(172,162,142,${(0.03 + Math.random() * 0.09).toFixed(3)})`;
+        g.beginPath();
+        g.ellipse(bx, by, br, br * (0.45 + Math.random() * 0.9), Math.random() * 3, 0, 7);
+        g.fill();
+      }
+      // сетка вен под кожей
+      g.strokeStyle = 'rgba(44,36,58,0.3)';
+      for (let i = 0; i < 24; i++) {
+        let vx = w * (0.26 + Math.random() * 0.48);
+        let vy = h * (0.25 + Math.random() * 0.36);
+        let vw = 2.3;
+        for (let sgm = 0; sgm < 5; sgm++) {
+          const nx = vx + (Math.random() - 0.5) * 26;
+          const ny = vy + 9 + Math.random() * 17;
+          g.lineWidth = vw;
+          g.beginPath(); g.moveTo(vx, vy); g.lineTo(nx, ny); g.stroke();
+          vx = nx; vy = ny; vw *= 0.74;
+        }
+      }
+      // засохшая грязь на ступнях и голенях
+      for (let i = 0; i < 40; i++) {
+        g.fillStyle = `rgba(38,28,18,${(0.1 + Math.random() * 0.3).toFixed(2)})`;
+        g.beginPath();
+        g.ellipse(w * (0.3 + Math.random() * 0.4), h * (0.8 + Math.random() * 0.18),
+          3 + Math.random() * 9, 2 + Math.random() * 6, Math.random() * 3, 0, 7);
+        g.fill();
+      }
+      g.globalCompositeOperation = 'source-over';
+
+      // --- ЗАПЕЧЁННЫЙ ОБЪЁМ: свет от камеры, края уходят в тень ---
+      // source-atop — тень ложится ТОЛЬКО на тело, фон остаётся прозрачным
+      g.globalCompositeOperation = 'source-atop';
+      const vol = g.createRadialGradient(cx - 10, h * 0.40, 34, cx, h * 0.45, 215);
+      vol.addColorStop(0, 'rgba(0,0,0,0)');
+      vol.addColorStop(0.42, 'rgba(8,6,6,0.10)');
+      vol.addColorStop(0.72, 'rgba(6,5,5,0.40)');
+      vol.addColorStop(1, 'rgba(3,2,2,0.74)');
+      g.fillStyle = vol;
+      g.fillRect(0, 0, w, h);
+
+      // ноги растворяются во мраке — стираем низ спрайта в прозрачность
+      g.globalCompositeOperation = 'destination-out';
+      const fade = g.createLinearGradient(0, h * 0.88, 0, h);
+      fade.addColorStop(0, 'rgba(0,0,0,0)');
+      fade.addColorStop(1, 'rgba(0,0,0,0.8)');
+      g.fillStyle = fade;
+      g.fillRect(0, h * 0.86, w, h * 0.14);
+      g.globalCompositeOperation = 'source-over';
     });
-    s.wH = 58; s.wW = 30;
+    s.wH = 62; s.wW = 34;
+    // куда крепить светящиеся зрачки (они рисуются отдельным слоем,
+    // чтобы гореть даже вне луча фонаря)
+    const tw2 = kind === 'twitch';
+    s.eye = {
+      x: (220 + (tw2 ? -14 : 10) + 2) / 440,
+      y: 0.174,
+      tilt: tw2 ? -1.3 : (kind === 'reach' ? 0.14 : 0.66),
+    };
     return s;
   }
 
@@ -1725,14 +2165,16 @@ const Render = (() => {
         c.restore();
         c.restore();
       }
-      // глаза Монстра светятся всегда — наклонены вместе с головой
-      if (it.monster) {
-        const ew = (15 * proj) / trY;
+      // зрачки Монстра тлеют в глазницах даже вне луча фонаря
+      if (it.monster && spr.eye) {
+        const ew = (11.2 * proj) / trY;
         c.save();
-        c.translate(screenX + wPix * 0.03, y0 + hPix * 0.135);
-        c.rotate(0.6);
+        c.translate(screenX - wPix / 2 + wPix * spr.eye.x, y0 + hPix * spr.eye.y);
+        c.rotate(spr.eye.tilt);
+        c.globalAlpha = 0.85 + Math.sin(t * 3.1) * 0.15;
         c.drawImage(SPR.monsterEyes.c, -ew / 2, -ew / 4, ew, ew / 2);
         c.restore();
+        c.globalAlpha = 1;
       }
     }
   }
@@ -2363,5 +2805,9 @@ const Render = (() => {
 
   function snapCamera(x, y) { cam.x = x; cam.y = y; }
 
-  return { init, setMap, drawFrame, trigger, snapCamera, cam, get canvasSize() { return { W, H }; } };
+  return {
+    init, setMap, drawFrame, trigger, snapCamera, cam,
+    get canvasSize() { return { W, H }; },
+    get sprites() { return SPR; },   // для отладки моделей
+  };
 })();
