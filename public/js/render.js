@@ -1540,18 +1540,18 @@ const Render = (() => {
         g.fillRect(-40, -60, 80, 120);
         // трупный сине-серый тон и провал яркости
         g.globalCompositeOperation = 'multiply';
-        g.fillStyle = 'rgba(214,212,204,0.55)';
+        g.fillStyle = 'rgba(238,236,230,0.32)';
         g.fillRect(-40, -60, 80, 120);
         // холодный трупный подтон
         g.globalCompositeOperation = 'overlay';
-        g.fillStyle = 'rgba(70,74,86,0.35)';
+        g.fillStyle = 'rgba(96,100,116,0.22)';
         g.fillRect(-40, -60, 80, 120);
         // виньетка по краю черепа: лицо тонет в тени
         g.globalCompositeOperation = 'source-over';
         const vgn = g.createRadialGradient(0, -4, 12, 0, 0, 46);
         vgn.addColorStop(0, 'rgba(0,0,0,0)');
-        vgn.addColorStop(0.66, 'rgba(6,5,5,0.18)');
-        vgn.addColorStop(1, 'rgba(4,3,3,0.8)');
+        vgn.addColorStop(0.72, 'rgba(6,5,5,0.10)');
+        vgn.addColorStop(1, 'rgba(4,3,3,0.62)');
         g.fillStyle = vgn;
         g.fillRect(-40, -60, 80, 120);
         // гниль пятнами прямо по лицу
@@ -1564,6 +1564,15 @@ const Render = (() => {
             2 + Math.random() * 8, 2 + Math.random() * 6, Math.random() * 3, 0, 7);
           g.fill();
         }
+        // бледное пятно лица тянет свет на себя — так его видно
+        // в тёмном коридоре с нескольких метров
+        g.globalCompositeOperation = 'lighter';
+        const glow = g.createRadialGradient(0, -6, 4, 0, -2, 40);
+        glow.addColorStop(0, 'rgba(58,56,52,0.55)');
+        glow.addColorStop(0.6, 'rgba(40,39,37,0.28)');
+        glow.addColorStop(1, 'rgba(20,20,20,0)');
+        g.fillStyle = glow;
+        g.fillRect(-40, -60, 80, 120);
         g.restore();
         // швы по краю лица — будто оно пришито к черепу
         g.strokeStyle = 'rgba(46,28,22,0.75)';
@@ -1681,7 +1690,7 @@ const Render = (() => {
       // редкие мокрые пряди волос
       g.strokeStyle = 'rgba(26,22,19,0.9)';
       g.lineCap = 'round';
-      const hairN = hasFace ? 5 : 14;
+      const hairN = hasFace ? 0 : 14;
       for (let i = 0; i < hairN; i++) {
         const a = -2.5 + i * (hasFace ? 0.62 : 0.22);
         const rx = Math.cos(a) * 33, ry = -30 + Math.sin(a) * 20;
@@ -2420,6 +2429,10 @@ const Render = (() => {
   // ---------- скримеры (морды + фото) ----------
   function pickScareVariant() {
     const pool = [];
+    // лицо существа тоже участвует в лотерее скримеров
+    if (monsterFaceImg && monsterFaceImg.complete && monsterFaceImg.naturalWidth) {
+      pool.push({ type: 'img', img: monsterFaceImg }, { type: 'img', img: monsterFaceImg });
+    }
     for (const img of scareImages) {
       if (img.complete && img.naturalWidth > 0) {
         pool.push({ type: 'img', img }, { type: 'img', img });
