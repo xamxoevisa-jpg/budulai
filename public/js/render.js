@@ -1977,9 +1977,29 @@ const Render = (() => {
   // ---------- пол и потолок: перспективный рендер ----------
   // низкое разрешение + сглаженный апскейл = скорость и «мягкая» картинка
   let lowBuf = null;
+  // временный холст: спрайт нужно ЗАТЕМНЯТЬ, а не гасить прозрачностью,
+  // иначе на фоне освещённой стены он выглядит призраком
+  let shadeBuf = null;
+  function shadeSprite(spr, k) {
+    if (!shadeBuf) shadeBuf = document.createElement('canvas');
+    const sw = spr.c.width, sh = spr.c.height;
+    if (shadeBuf.width !== sw || shadeBuf.height !== sh) {
+      shadeBuf.width = sw; shadeBuf.height = sh;
+    }
+    const g = shadeBuf.getContext('2d');
+    g.globalCompositeOperation = 'source-over';
+    g.clearRect(0, 0, sw, sh);
+    g.drawImage(spr.c, 0, 0);
+    g.globalCompositeOperation = 'source-atop';
+    g.fillStyle = `rgba(0,0,0,${(1 - k).toFixed(3)})`;
+    g.fillRect(0, 0, sw, sh);
+    g.globalCompositeOperation = 'source-over';
+    return shadeBuf;
+  }
   function ensureLowBuf() {
-    const w = Math.min(232, Math.max(120, W >> 2));
-    const h = Math.min(300, Math.max(150, H >> 2));
+    // разрешение пола/потолка: чем выше, тем чётче плитка под ногами
+    const w = Math.min(400, Math.max(160, W >> 1));
+    const h = Math.min(500, Math.max(200, H >> 1));
     if (lowBuf && lowBuf.w === w && lowBuf.h === h) return;
     const cv = document.createElement('canvas');
     cv.width = w; cv.height = h;
@@ -2003,8 +2023,9 @@ const Render = (() => {
       const dy = y - midLow;
       const isFloor = dy > 0;
       const ady = Math.abs(dy);
-      if (ady < 1.2) { // у горизонта — чернота тумана
-        for (let x = 0; x < w; x++) u32[y * w + x] = 0xff000000;
+      if (ady < 1.2) { // у горизонта — дымка, а не пустой чёрный
+        const hz = isHunter ? 0xff05060f : 0xff0d0b0a;
+        for (let x = 0; x < w; x++) u32[y * w + x] = hz;
         continue;
       }
       const rowDist = K / ady;
@@ -2037,10 +2058,18 @@ const Render = (() => {
             else b = fall * Math.max(0, 1 - Math.abs(camXs) * 1.3) + amb;
             b = Math.min(1, (b + lightBoost * (isFloor ? 0.35 : 0.2)) * rowCeilK);
             const m8 = (b * 256) | 0;
-            const r = ((texel & 255) * m8) >> 8;
-            const g = (((texel >> 8) & 255) * m8) >> 8;
-            const bl = (((texel >> 16) & 255) * m8) >> 8;
-            out = 0xff000000 | (bl << 16) | (g << 8) | r;
+            let r = ((texel & 255) * m8) >> 8;
+            let g = (((texel >> 8) & 255) * m8) >> 8;
+            let bl = (((texel >> 16) & 255) * m8) >> 8;
+            // атмосферная дымка: с расстоянием цвет тянется к цвету воздуха
+            const fogK = rowDist > 120 ? Math.min(0.62, (rowDist - 120) / 900) : 0;
+            if (fogK > 0) {
+              const fr = isHunter ? 14 : 11, fg2 = isHunter ? 6 : 12, fb = isHunter ? 6 : 18;
+              r += (fr - r) * fogK;
+              g += (fg2 - g) * fogK;
+              bl += (fb - bl) * fogK;
+            }
+            out = 0xff000000 | ((bl | 0) << 16) | ((g | 0) << 8) | (r | 0);
           }
         }
         u32[rowO + x] = out;
@@ -2155,6 +2184,20 @@ const Render = (() => {
 
       const x = i * colW;
       c.drawImage(tex.c, texX, 0, 1, TXS, x, y0, colW + 1, lineH);
+      // окклюзия у стыков с полом и потолком: угол всегда темнее плоскости
+      if (lineH > 6) {
+        const ao = Math.min(lineH * 0.34, 46);
+        let ag2 = c.createLinearGradient(0, y0, 0, y0 + ao);
+        ag2.addColorStop(0, 'rgba(0,0,0,0.55)');
+        ag2.addColorStop(1, 'rgba(0,0,0,0)');
+        c.fillStyle = ag2;
+        c.fillRect(x, y0, colW + 1, ao);
+        ag2 = c.createLinearGradient(0, y0 + lineH, 0, y0 + lineH - ao);
+        ag2.addColorStop(0, 'rgba(0,0,0,0.62)');
+        ag2.addColorStop(1, 'rgba(0,0,0,0)');
+        c.fillStyle = ag2;
+        c.fillRect(x, y0 + lineH - ao, colW + 1, ao);
+      }
 
       // затемнение по свету
       let b = lightAt(isHunter, camXs, dist, tile === 4);
@@ -2164,6 +2207,30 @@ const Render = (() => {
         c.fillStyle = `rgba(0,0,0,${shade.toFixed(3)})`;
         c.fillRect(x, y0 - 1, colW + 1, lineH + 2);
       }
+      // атмосферная дымка вдаль
+      const fogK = dist > 120 ? Math.min(0.55, (dist - 120) / 900) : 0;
+      if (fogK > 0.01) {
+        c.fillStyle = isHunter
+          ? `rgba(16,6,6,${fogK.toFixed(3)})`
+          : `rgba(12,13,20,${fogK.toFixed(3)})`;
+        c.fillRect(x, y0 - 1, colW + 1, lineH + 2);
+      }
+    }
+
+    // --- мокрый блеск пола: отражение луча на плитке ---
+    if (!isHunter && fx.flicker > 0.05) {
+      c.save();
+      c.globalCompositeOperation = 'lighter';
+      const refl = c.createLinearGradient(0, mid, 0, H);
+      refl.addColorStop(0, 'rgba(0,0,0,0)');
+      refl.addColorStop(0.25, `rgba(120,96,58,${0.10 * fx.flicker})`);
+      refl.addColorStop(0.6, `rgba(150,120,72,${0.07 * fx.flicker})`);
+      refl.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = refl;
+      // узкая вертикальная полоса — как отражение источника в мокром полу
+      const rw = W * 0.3;
+      c.fillRect(W / 2 - rw / 2, mid, rw, H - mid);
+      c.restore();
     }
 
     // --- билборды ---
@@ -2300,7 +2367,28 @@ const Render = (() => {
       if (it.survivor) alpha = Math.min(1, Math.max(alpha, 0.95 - trY / 900));
       if (alpha < 0.02) continue;
 
+      // КОНТАКТНАЯ ТЕНЬ: без неё объект «висит» над полом
+      if (!spr.ceil && !it.floorMark && !it.noLight) {
+        const shW = wPix * 0.62, shH = shW * 0.26;
+        const sgr = c.createRadialGradient(screenX, floorScr, 0, screenX, floorScr, shW);
+        const sa = Math.min(0.75, 0.3 + alpha * 0.45);
+        sgr.addColorStop(0, `rgba(0,0,0,${sa.toFixed(2)})`);
+        sgr.addColorStop(0.55, `rgba(0,0,0,${(sa * 0.5).toFixed(2)})`);
+        sgr.addColorStop(1, 'rgba(0,0,0,0)');
+        c.save();
+        c.translate(screenX, floorScr);
+        c.scale(1, shH / shW);
+        c.translate(-screenX, -floorScr);
+        c.fillStyle = sgr;
+        c.beginPath(); c.arc(screenX, floorScr, shW, 0, 7); c.fill();
+        c.restore();
+      }
+
       // порисуем колонками с проверкой z-буфера
+      // персонажей затемняем по-настоящему, реквизит — прозрачностью (дешевле)
+      const solid = (it.monster || it.survivor) && alpha < 0.98;
+      const srcCanvas = solid ? shadeSprite(spr, alpha) : spr.c;
+      if (solid) alpha = 1;
       const sw = spr.c.width;
       const x0 = Math.max(0, Math.floor(screenX - wPix / 2));
       const x1 = Math.min(W - 1, Math.ceil(screenX + wPix / 2));
@@ -2311,7 +2399,7 @@ const Render = (() => {
         if (zBuf[zi] <= trY) continue;
         const u = (x - (screenX - wPix / 2)) / wPix;
         const sx = Math.max(0, Math.min(sw - 1, Math.floor(u * sw)));
-        c.drawImage(spr.c, sx, 0, 1, spr.c.height, x, y0, step + 1, hPix);
+        c.drawImage(srcCanvas, sx, 0, 1, spr.c.height, x, y0, step + 1, hPix);
       }
       c.globalAlpha = 1;
 
