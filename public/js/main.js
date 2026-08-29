@@ -586,7 +586,7 @@
     // --- HUD ---
     UI.setTimer(G.timer);
     UI.setObjective(G.fuses, G.exitOpen, G.role);
-    UI.setRepair(G.repairing);
+    UI.setRepair(G.repairing, G.role);
     UI.setStamina(G.stamina, G.staminaMax, G.role === 'hunter');
     UI.setFreeze(G.freeze, G.role);
     if (G.ended) UI.setInteractHint(null);

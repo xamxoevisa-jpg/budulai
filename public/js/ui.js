@@ -99,10 +99,12 @@ const UI = (() => {
     el.innerHTML = `<div class="fu">${marks} <span style="font-size:11px">${done}/${fuses.length}</span></div>${line2}`;
   }
 
-  // полоса починки щита, у которого стоишь
-  function setRepair(p) {
+  // полоса починки щита, у которого стоишь.
+  // Только для Жертвы: у Монстра это чужое действие, он о нём узнаёт
+  // по искрам на слух, а не по подписи «подаю питание».
+  function setRepair(p, role) {
     const w = $('repairWrap');
-    if (p > 0.01 && p < 1) {
+    if (role === 'survivor' && p > 0.01 && p < 1) {
       w.classList.remove('hidden');
       $('repairBar').style.width = (p * 100).toFixed(0) + '%';
     } else {
