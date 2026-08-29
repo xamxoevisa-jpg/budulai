@@ -101,11 +101,14 @@ const Input = (() => {
   }
 
   function initTouch() {
-    // слушаем на документе — джойстик может появиться где угодно слева
-    document.addEventListener('touchstart', onTouchStart, { passive: false });
-    document.addEventListener('touchmove', onTouchMove, { passive: false });
-    document.addEventListener('touchend', onTouchEnd, { passive: false });
-    document.addEventListener('touchcancel', onTouchEnd, { passive: false });
+    // ВАЖНО: слушаем касания только на игровом канвасе, а не на документе.
+    // Экраны входа/лобби лежат ПОВЕРХ канваса — их поля и кнопки получают
+    // тапы нативно (иначе preventDefault глушил бы клавиатуру и клики на iOS)
+    const cnv = document.getElementById('game');
+    cnv.addEventListener('touchstart', onTouchStart, { passive: false });
+    cnv.addEventListener('touchmove', onTouchMove, { passive: false });
+    cnv.addEventListener('touchend', onTouchEnd, { passive: false });
+    cnv.addEventListener('touchcancel', onTouchEnd, { passive: false });
 
     // кнопки
     const bindBtn = (id, down, up) => {
@@ -117,15 +120,11 @@ const Input = (() => {
     bindBtn('btnAct', () => { state.interactPressed = true; });
   }
 
-  // блокировка жестов iOS: двойной тап, пинч-зум
+  // блокировка жестов iOS: пинч-зум и дабл-клик.
+  // Двойной тап давит CSS touch-action на body; глобальный preventDefault
+  // на touchend НЕЛЬЗЯ — он ломает нажатия кнопок и фокус полей на iPhone
   document.addEventListener('gesturestart', (e) => e.preventDefault());
   document.addEventListener('dblclick', (e) => e.preventDefault());
-  let lastTap = 0;
-  document.addEventListener('touchend', (e) => {
-    const now = Date.now();
-    if (now - lastTap < 300 && e.cancelable) e.preventDefault(); // двойной тап
-    lastTap = now;
-  }, { passive: false });
 
   // --- опрос состояния (вызывается из main каждый кадр) ---
   // cam: {x, y} + canvas — чтобы перевести мышь в мировой угол

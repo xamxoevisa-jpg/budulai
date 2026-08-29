@@ -163,7 +163,13 @@ html, body {
   color: #201812;
   padding: 6px 4px;
   outline: none;
+  /* иначе наследуется user-select:none c body — iOS не даёт фокус/каретку */
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  touch-action: manipulation;
 }
+/* кнопкам — быстрый отклик на тап без 300мс задержки и без зума */
+button, .touch-btn { touch-action: manipulation; }
 #nameInput::placeholder { color: #9a8c70; font-size: 16px; }
 
 .blood-btn {
@@ -408,6 +414,7 @@ html, body {
 .ro-note { margin-top: 16px; font-size: 12px; font-style: italic; color: #55483a; text-align: center; }
 
 #tapForSound {
+  pointer-events: none; /* не перехватывать тапы */
   position: absolute;
   bottom: calc(40px + var(--safe-bottom));
   left: 50%; transform: translateX(-50%);
