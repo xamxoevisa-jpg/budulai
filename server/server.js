@@ -295,7 +295,7 @@ setInterval(() => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log('');
-  console.log('  БУДУЛАЙ — сервер запущен');
+  console.log('  ПОЙМАЙ БУДУЛАЯ — сервер запущен');
   console.log(`  Локально:  http://localhost:${PORT}`);
   console.log('');
 });
