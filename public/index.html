@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<!-- viewport-fit=cover — для «чёлки» iPhone; запрет масштабирования -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<title>ЧЕРНОЛЕСЬЕ</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- Игровой холст -->
+<canvas id="game"></canvas>
+
+<!-- ЭКРАН ВХОДА: «архивная запись пациента» -->
+<div id="login" class="screen">
+  <div class="paper">
+    <div class="paper-header">
+      <div class="stamp">АРХИВ · ДЕЛО № 0417</div>
+      <h1 class="title">ЧЕРНОЛЕСЬЕ</h1>
+      <div class="subtitle">областная психиатрическая лечебница<br>записи прекращены в 1986 году</div>
+    </div>
+    <div class="paper-body">
+      <label class="field-label">фамилия поступившего:</label>
+      <input id="nameInput" type="text" maxlength="16" autocomplete="off" placeholder="впишите имя" />
+      <button id="enterBtn" class="blood-btn">ВОЙТИ В ЧЕРНОЛЕСЬЕ</button>
+      <div id="loginStatus" class="login-status"></div>
+    </div>
+    <div class="paper-footer">приёмный покой не охраняется. свет отключён за неуплату.</div>
+  </div>
+</div>
+
+<!-- КОМНАТА ОЖИДАНИЯ -->
+<div id="lobby" class="screen hidden">
+  <div class="paper">
+    <div class="paper-header">
+      <div class="stamp">ЖУРНАЛ ПОСТУПЛЕНИЙ</div>
+      <h2 class="title small">приёмный покой</h2>
+    </div>
+    <div class="paper-body">
+      <div id="lobbyList" class="lobby-list"></div>
+      <button id="readyBtn" class="blood-btn">Я ГОТОВ(А)</button>
+      <button id="botBtn" class="blood-btn ghost hidden">☨ ПОЗВАТЬ САНИТАРА (тренировка с ботом)</button>
+      <div class="hint">игра начнётся, когда оба пациента отметятся</div>
+    </div>
+  </div>
+</div>
+
+<!-- HUD во время игры -->
+<div id="hud" class="hidden">
+  <div id="roleBar">
+    <span id="roleLabel"></span>
+    <span id="timerLabel">3:00</span>
+  </div>
+  <div id="scoreCard"></div>
+  <div id="staminaWrap"><div id="staminaBar"></div></div>
+  <div id="pingLabel">— мс</div>
+  <div id="interactHint" class="hidden"></div>
+  <div id="freezeOverlay" class="hidden">
+    <div id="freezeText"></div>
+    <div id="freezeCount"></div>
+  </div>
+</div>
+
+<!-- Мобильное управление -->
+<div id="touchUI" class="hidden">
+  <div id="joyBase" class="hidden"><div id="joyKnob"></div></div>
+  <div id="btnSprint" class="touch-btn">БЕГ</div>
+  <div id="btnAct" class="touch-btn">✚</div>
+</div>
+
+<!-- Оверлей разрыва связи -->
+<div id="dcOverlay" class="screen hidden">
+  <div class="dc-text">СВЯЗЬ С ПАЦИЕНТОМ ПОТЕРЯНА...</div>
+  <div class="dc-sub">ожидаем возвращения</div>
+</div>
+
+<!-- Экран поимки / конца раунда / финал -->
+<div id="roundOverlay" class="screen hidden"></div>
+
+<!-- Требование первого касания для звука (iOS) -->
+<div id="tapForSound" class="hidden">коснитесь экрана</div>
+
+<script src="js/network.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/input.js"></script>
+<script src="js/render.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

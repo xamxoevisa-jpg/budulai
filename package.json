@@ -1,0 +1,18 @@
+{
+  "name": "chernolesie",
+  "version": "1.0.0",
+  "description": "Чернолесье — сетевая хоррор-игра в догонялки для двух игроков",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "online": "node scripts/online.js",
+    "test": "node tests/integration.js && node tests/bot-test.js && node tests/bot-catch-test.js && node tests/bot-slot-test.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.17.0"
+  }
+}
