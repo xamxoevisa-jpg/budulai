@@ -48,10 +48,10 @@ const UI = (() => {
   function setRole(role) {
     const el = $('roleLabel');
     if (role === 'hunter') {
-      el.textContent = 'ВЫ — МОНСТР. НАЙДИ ЕЁ ПО СЛЕДАМ';
+      el.textContent = 'ВЫ — МОНСТР. НЕ ДАЙ ЕЙ УЙТИ';
       el.className = 'hunter';
     } else {
-      el.textContent = 'ВЫ — ЖЕРТВА. ПРОДЕРЖИСЬ 3 МИНУТЫ';
+      el.textContent = 'ВЫ — ЖЕРТВА. ВКЛЮЧИ ЩИТЫ И УХОДИ';
       el.className = '';
     }
   }
@@ -84,6 +84,45 @@ const UI = (() => {
     $('pingLabel').style.color = ms > 150 ? 'rgba(200,60,60,0.7)' : 'rgba(216,205,180,0.4)';
   }
 
+  // цель раунда в HUD: сколько щитов включено
+  function setObjective(fuses, exitOpen, role) {
+    const el = $('objective');
+    if (!fuses || !fuses.length) { el.textContent = ''; return; }
+    const marks = fuses.map(f => `<span class="${f.done ? 'on' : 'off'}">${f.done ? '◉' : '○'}</span>`).join(' ');
+    const done = fuses.filter(f => f.done).length;
+    let line2;
+    if (exitOpen) {
+      line2 = `<span class="exit-on">${role === 'survivor' ? '► К ВЫХОДУ' : '► ОНА ИДЁТ К ВЫХОДУ'}</span>`;
+    } else {
+      line2 = role === 'survivor' ? 'включи щиты' : 'не дай включить';
+    }
+    el.innerHTML = `<div class="fu">${marks} <span style="font-size:11px">${done}/${fuses.length}</span></div>${line2}`;
+  }
+
+  // полоса починки щита, у которого стоишь
+  function setRepair(p) {
+    const w = $('repairWrap');
+    if (p > 0.01 && p < 1) {
+      w.classList.remove('hidden');
+      $('repairBar').style.width = (p * 100).toFixed(0) + '%';
+    } else {
+      w.classList.add('hidden');
+    }
+  }
+
+  // крупное сообщение о событии цели
+  let flashTimer = null;
+  function flashObjective(text) {
+    const el = $('objFlash');
+    el.textContent = text;
+    el.classList.remove('hidden');
+    el.style.animation = 'none';
+    void el.offsetWidth;          // перезапуск анимации
+    el.style.animation = '';
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => el.classList.add('hidden'), 2600);
+  }
+
   function setInteractHint(text) {
     const el = $('interactHint');
     if (text) { el.textContent = text; el.classList.remove('hidden'); }
@@ -109,10 +148,16 @@ const UI = (() => {
   function showRoundEnd(stats, mySlot) {
     const iWon = stats.winnerSlot === mySlot;
     const caught = stats.result === 'caught';
+    const timeout = stats.result === 'timeout';
     const title = caught
       ? (iWon ? 'ПОЙМАНА' : 'ВАС ПОЙМАЛИ')
-      : (iWon ? 'ВЫ ВЫЖИЛИ' : 'ЖЕРТВА СБЕЖАЛА');
-    const how = stats.how === 'hideout' ? 'найдена в укрытии' : caught ? 'настигнута в коридорах' : 'продержалась до рассвета';
+      : timeout
+        ? (iWon ? 'ОНА НЕ УСПЕЛА' : 'ВРЕМЯ ВЫШЛО')
+        : (iWon ? 'ВЫ СБЕЖАЛИ' : 'ЖЕРТВА УШЛА');
+    const how = stats.how === 'hideout' ? 'найдена в укрытии'
+      : caught ? 'настигнута в коридорах'
+      : timeout ? 'не успела подать питание и уйти'
+      : 'подала питание и вышла наружу';
     const el = $('roundOverlay');
     el.innerHTML = `
       <div class="paper">
@@ -122,6 +167,7 @@ const UI = (() => {
           <tr><td>исход:</td><td>${how}</td></tr>
           <tr><td>осталось времени:</td><td>${Math.floor(stats.timeLeft / 60)}:${String(Math.floor(stats.timeLeft % 60)).padStart(2, '0')}</td></tr>
           <tr><td>пройдено жертвой:</td><td>${stats.distance} м</td></tr>
+          <tr><td>щитов включено:</td><td>${stats.fuses ?? 0} из ${stats.fusesTotal ?? 3}</td></tr>
           <tr><td>пряталась:</td><td>${stats.hides} раз(а)</td></tr>
           <tr><td>счёт:</td><td>${escapeHtml(stats.names[0])} ${stats.score[0]} : ${stats.score[1]} ${escapeHtml(stats.names[1])}</td></tr>
         </table>
@@ -162,6 +208,7 @@ const UI = (() => {
   return {
     $, showLogin, showLobby, showGame, renderLobby,
     setRole, setTimer, setScore, setStamina, setPing, setInteractHint,
+    setObjective, setRepair, flashObjective,
     setFreeze, showRoundEnd, hideRoundEnd, showGameOver, setDisconnected,
   };
 })();

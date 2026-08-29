@@ -82,7 +82,7 @@ async function main() {
       // я — монстр: стою, жертва-бот должна дожить (escaped)
       await wait(() => state.roundEnds.length > endsBefore, 60000, 'конец раунда ' + round);
       const re = state.roundEnds[state.roundEnds.length - 1];
-      assert(re.stats.result === 'escaped', 'бот-Жертва дожила до конца раунда против неподвижного Монстра');
+      assert(re.stats.result !== 'caught', `бот-Жертва не поймана неподвижным Монстром (${re.stats.result})`);
     }
     await sleep(1500); // интермиссия
   }

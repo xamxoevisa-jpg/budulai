@@ -212,6 +212,7 @@ const Render = (() => {
   const ceilTexList = [];
   const wallTexIdx = {};    // palKey -> [индексы вариантов]
   const floorTexIdx = {};
+  let litTiles = null;      // Uint8Array(W*H): где подано питание (щит включён)
   let wallMapTex = null;    // Uint8Array(W*H): какая текстура у тайла-стены
   let floorMapTex = null;   // Uint8Array(W*H): какая текстура пола
   let ceilMapTex = null;
@@ -1001,6 +1002,83 @@ const Render = (() => {
     });
     SPR.bodybag.wH = 46; SPR.bodybag.wW = 20; SPR.bodybag.ceil = true;
 
+
+    // ЭЛЕКТРОЩИТ — цель раунда. Виден издалека по лампочке:
+    // задачу игрок должен находить, а не искать вслепую.
+    const fusePanel = (on) => spriteCanvas(120, 150, (g, w, h) => {
+      g.fillStyle = '#1d2124';
+      g.fillRect(10, 8, w - 20, h - 30);
+      g.fillStyle = on ? '#2e3a33' : '#2a2d30';
+      g.fillRect(15, 13, w - 30, h - 40);
+      g.strokeStyle = '#0e1113'; g.lineWidth = 3;
+      g.strokeRect(10, 8, w - 20, h - 30);
+      // дверца с петлями и ручкой
+      g.strokeStyle = '#454c50'; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(w / 2, 13); g.lineTo(w / 2, h - 32); g.stroke();
+      g.fillStyle = '#565e62';
+      g.fillRect(w / 2 - 9, h / 2 - 6, 5, 12);
+      g.fillRect(w / 2 + 4, h / 2 - 6, 5, 12);
+      // рубильники
+      for (let i = 0; i < 3; i++) {
+        const yy = 30 + i * 22;
+        g.fillStyle = '#14171a'; g.fillRect(24, yy, 20, 12);
+        g.fillStyle = on ? '#7fd18a' : '#6a4a44';
+        g.fillRect(on ? 34 : 26, yy + 2, 8, 8);
+      }
+      // предупреждающий знак
+      g.fillStyle = on ? 'rgba(150,200,150,0.5)' : 'rgba(190,170,60,0.55)';
+      g.beginPath();
+      g.moveTo(w - 34, 34); g.lineTo(w - 22, 56); g.lineTo(w - 46, 56);
+      g.closePath(); g.fill();
+      g.fillStyle = '#1a1a14';
+      g.font = 'bold 15px Georgia';
+      g.fillText('!', w - 37, 54);
+      // индикатор: красный тлеет / зелёный горит
+      const led = on ? '120,255,150' : '255,90,60';
+      const lg = g.createRadialGradient(w / 2, h - 22, 0, w / 2, h - 22, 22);
+      lg.addColorStop(0, `rgba(${led},1)`);
+      lg.addColorStop(0.25, `rgba(${led},0.6)`);
+      lg.addColorStop(1, `rgba(${led},0)`);
+      g.fillStyle = lg;
+      g.fillRect(w / 2 - 22, h - 44, 44, 44);
+      // кабель вниз
+      g.strokeStyle = '#20242699'; g.lineWidth = 4;
+      g.beginPath(); g.moveTo(w / 2 + 14, h - 30); g.lineTo(w / 2 + 20, h); g.stroke();
+    });
+    SPR.fuse = fusePanel(false); SPR.fuse.wH = 30; SPR.fuse.wW = 24;
+    SPR.fuseOn = fusePanel(true); SPR.fuseOn.wH = 30; SPR.fuseOn.wW = 24;
+
+    // ВЫХОД — пожарная дверь. Заперта, пока не подано питание.
+    const exitDoor = (open) => spriteCanvas(140, 220, (g, w, h) => {
+      g.fillStyle = '#161a1c';
+      g.fillRect(12, 10, w - 24, h - 12);
+      g.fillStyle = open ? '#2b3a2e' : '#232829';
+      g.fillRect(20, 18, w - 40, h - 20);
+      g.strokeStyle = '#0c0e0f'; g.lineWidth = 4;
+      g.strokeRect(12, 10, w - 24, h - 12);
+      // засов и ручка
+      g.fillStyle = open ? '#5f7a63' : '#3a4042';
+      g.fillRect(w - 44, h / 2 - 16, 10, 32);
+      if (!open) { g.fillStyle = '#4a3a2a'; g.fillRect(20, h * 0.42, w - 40, 12); }
+      // табло «ВЫХОД»
+      g.fillStyle = open ? 'rgba(120,255,150,0.95)' : 'rgba(70,80,70,0.55)';
+      g.fillRect(w / 2 - 34, 22, 68, 20);
+      g.fillStyle = open ? '#0d2413' : '#1a1d1a';
+      g.font = 'bold 13px Georgia';
+      g.textAlign = 'center';
+      g.fillText('ВЫХОД', w / 2, 37);
+      g.textAlign = 'start';
+      if (open) {
+        // свет улицы из щели
+        const og = g.createLinearGradient(0, h, 0, h - 60);
+        og.addColorStop(0, 'rgba(150,220,170,0.55)');
+        og.addColorStop(1, 'rgba(150,220,170,0)');
+        g.fillStyle = og;
+        g.fillRect(20, h - 60, w - 40, 60);
+      }
+    });
+    SPR.exitClosed = exitDoor(false); SPR.exitClosed.wH = 46; SPR.exitClosed.wW = 30;
+    SPR.exitOn = exitDoor(true); SPR.exitOn.wH = 46; SPR.exitOn.wW = 30;
 
     // Жертва — её теперь видит Монстр, когда она в прямой видимости
     SPR.survivor = spriteCanvas(240, 470, (g, w, h) => {
@@ -1921,6 +1999,7 @@ const Render = (() => {
     };
     const walkT = (x, y) => x >= 0 && y >= 0 && x < m.W && y < m.H &&
       (m.grid[y][x] === 1 || m.grid[y][x] === 3 || m.grid[y][x] === 5);
+    litTiles = new Uint8Array(m.W * m.H);
     wallMapTex = new Uint8Array(m.W * m.H);
     floorMapTex = new Uint8Array(m.W * m.H);
     ceilMapTex = new Uint8Array(m.W * m.H);
@@ -2050,6 +2129,7 @@ const Render = (() => {
           const ti = isFloor ? floorMapTex[mi] : ceilMapTex[mi];
           const tex = list[ti];
           if (tex) {
+            const litHere = litTiles && litTiles[mi];
             let u = ((fX % T) / T * TXS) | 0; if (u < 0) u += TXS;
             let v = ((fY % T) / T * TXS) | 0; if (v < 0) v += TXS;
             const texel = tex.data[v * TXS + u];
@@ -2058,6 +2138,7 @@ const Render = (() => {
             let b;
             if (isHunter) b = fall;
             else b = fall * Math.max(0, 1 - Math.abs(camXs) * 1.3) + amb;
+            if (litHere) b = Math.max(b, 0.44 * Math.max(0.25, 1 - rowDist / 1100));
             b = Math.min(1, (b + lightBoost * (isFloor ? 0.35 : 0.2)) * rowCeilK);
             const m8 = (b * 256) | 0;
             let r = ((texel & 255) * m8) >> 8;
@@ -2205,6 +2286,10 @@ const Render = (() => {
 
       // затемнение по свету
       let b = lightAt(isHunter, camXs, dist, tile === 4);
+      // в запитанном крыле горят лампы — стены там видно и без фонаря
+      if (litTiles && litTiles[floorY * map.W + floorX]) {
+        b = Math.max(b, 0.5 * Math.max(0.2, 1 - dist / 1100));
+      }
       if (side === 1) b *= 0.78; // грани С/Ю чуть темнее — объём
       const shade = 1 - Math.min(1, b);
       if (shade > 0.01) {
@@ -2312,6 +2397,25 @@ const Render = (() => {
         list.push({ spr: frame2, x: view.foe.x, y: view.foe.y, d2, monster: true });
       }
     }
+    // ЩИТЫ и ВЫХОД — цели раунда, видны обоим и светятся издалека
+    if (view.fuses) {
+      for (const f of view.fuses) {
+        const dx = f.x - px, dy = f.y - py;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > 1400 * 1400) continue;
+        list.push({ spr: f.done ? SPR.fuseOn : SPR.fuse, x: f.x, y: f.y, d2,
+          glow: f.done ? 0.85 : 0.5 });
+      }
+    }
+    if (view.exit) {
+      const dx = view.exit.x - px, dy = view.exit.y - py;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < 1400 * 1400) {
+        list.push({ spr: view.exitOpen ? SPR.exitOn : SPR.exitClosed,
+          x: view.exit.x, y: view.exit.y, d2, glow: view.exitOpen ? 0.95 : 0.35 });
+      }
+    }
+
     // Жертва — Монстр видит её только когда сервер прислал позицию
     // (в тёмном зрении и без стены между ними)
     if (isHunter && view.foe) {
@@ -2356,7 +2460,13 @@ const Render = (() => {
       // освещение спрайта
       const camXs = trX / trY / tanHF;
       let b = lightAt(isHunter, camXs, trY, false);
-      if (it.glow != null) b = Math.max(b, 0.85 * it.glow); // следы светятся
+      if (litTiles && map) {
+        const ltx = (it.x / T) | 0, lty = (it.y / T) | 0;
+        if (ltx >= 0 && lty >= 0 && ltx < map.W && lty < map.H && litTiles[lty * map.W + ltx]) {
+          b = Math.max(b, 0.55 * Math.max(0.2, 1 - trY / 1100));
+        }
+      }
+      if (it.glow != null) b = Math.max(b, 0.85 * it.glow); // следы и цели светятся
       if (it.lamp && !it.lamp.dead) {
         let inten = 0.8 + Math.sin(t * 3 + it.lamp.phase) * 0.15;
         if (it.lamp.broken) inten *= (Math.sin(t * 17 + it.lamp.phase * 9) > 0.4 ? 1 : 0.1);
@@ -3118,10 +3228,22 @@ const Render = (() => {
     }
   }
 
+  // щит включён — в этом крыле дают свет. Комната перестаёт быть
+  // чёрной дырой, и это заметно меняет ощущение от места.
+  function lightRoom(room) {
+    if (!litTiles || !map || !room) return;
+    for (let y = room.y - 1; y <= room.y + room.h; y++) {
+      for (let x = room.x - 1; x <= room.x + room.w; x++) {
+        if (x < 0 || y < 0 || x >= map.W || y >= map.H) continue;
+        litTiles[y * map.W + x] = 1;
+      }
+    }
+  }
+
   function snapCamera(x, y) { cam.x = x; cam.y = y; }
 
   return {
-    init, setMap, drawFrame, trigger, snapCamera, cam,
+    init, setMap, drawFrame, trigger, snapCamera, lightRoom, cam,
     get canvasSize() { return { W, H }; },
     get sprites() { return SPR; },   // для отладки моделей
   };

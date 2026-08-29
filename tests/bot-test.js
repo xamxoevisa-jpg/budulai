@@ -92,7 +92,7 @@ async function main() {
   console.log('\n== ДОИГРЫВАЕМ МАТЧ ==');
   await wait(() => state.roundEnds.length >= 1, 30000, 'раунд завершился');
   const re = state.roundEnds[0];
-  assert(['caught', 'escaped'].includes(re.stats.result), `раунд завершён (${re.stats.result})`);
+  assert(['caught', 'escaped', 'timeout'].includes(re.stats.result), `раунд завершён (${re.stats.result})`);
   await wait(() => state.gameOver, 15000, 'gameOver');
   assert(state.gameOver.names.includes('Санитар'), 'финал матча с ботом показан');
 

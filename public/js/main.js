@@ -27,6 +27,10 @@
     score: [0, 0],
     heart: 0, breath: 0,
     seen: 0, wasSeen: 0,   // Монстр держит Жертву в поле зрения
+    fuses: [],             // [{x,y,done,progress}] — щиты раунда
+    exit: null, exitOpen: false,
+    repairing: 0,          // доля починки щита, у которого стоим
+    noise: null,           // где Монстр слышал шум щита
     stamina: 100, staminaMax: 100,
     hidden: false,
     footprintTTL: 5,
@@ -124,6 +128,12 @@
     G.staminaMax = msg.const.staminaMax;
     G.footprintTTL = msg.const.footprintTTL;
     G.interactRadius = msg.const.interactRadius;
+    G.fuses = (msg.map.fuses || []).map(f => ({ ...f, done: false, progress: 0 }));
+    G.exit = msg.map.exit || null;
+    G.exitOpen = false;
+    G.repairing = 0;
+    G.noise = null;
+    G.fuseTime = msg.const.fuseTime || 4;
     G.footprints = [];
     G.foeBuf = [];
     G.hidden = false;
@@ -183,6 +193,19 @@
       G.foeBuf.push({ at: performance.now(), x: msg.foe.x, y: msg.foe.y, a: msg.foe.a, mov: msg.foe.mov });
       if (G.foeBuf.length > 30) G.foeBuf.shift();
     }
+    // прогресс щитов
+    if (msg.fu) {
+      let rep = 0;
+      for (let i = 0; i < msg.fu.length && i < G.fuses.length; i++) {
+        const wasDone = G.fuses[i].done;
+        G.fuses[i].done = !!msg.fu[i].d;
+        G.fuses[i].progress = msg.fu[i].p;
+        if (!G.fuses[i].done && msg.fu[i].p > 0.01) rep = Math.max(rep, msg.fu[i].p);
+        void wasDone;
+      }
+      G.repairing = rep;
+    }
+    G.exitOpen = !!msg.xo;
     G.heart = msg.heart || 0;
     G.breath = msg.breath || 0;
     // «он тебя увидел» — момент обнаружения бьёт по нервам
@@ -193,6 +216,30 @@
       Render.trigger('shake', 7);
     }
     G.wasSeen = G.seen;
+  });
+
+  Network.on('fuseDone', (msg) => {
+    const f = G.fuses[msg.id];
+    if (f) f.done = true;
+    Render.lightRoom(msg.room);          // в крыле дают свет
+    if (GameAudio.ready) GameAudio.powerOn();
+    UI.flashObjective(G.role === 'survivor'
+      ? `ЩИТ ВКЛЮЧЁН · ОСТАЛОСЬ ${msg.left}`
+      : `ОНА ВКЛЮЧИЛА ЩИТ · ОСТАЛОСЬ ${msg.left}`);
+  });
+
+  Network.on('exitOpen', (msg) => {
+    G.exitOpen = true;
+    G.exit = { x: msg.x, y: msg.y };
+    if (GameAudio.ready) GameAudio.alarm();
+    Render.trigger('shake', 5);
+    UI.flashObjective(G.role === 'survivor' ? 'ПИТАНИЕ ПОДАНО · К ВЫХОДУ!' : 'ВЫХОД ОТКРЫТ · НЕ ПУСТИ ЕЁ');
+  });
+
+  // Монстр слышит, как искрит щит
+  Network.on('noise', (msg) => {
+    G.noise = { x: msg.x, y: msg.y, at: performance.now() };
+    if (GameAudio.ready) GameAudio.spark();
   });
 
   Network.on('footprint', (msg) => {
@@ -517,6 +564,15 @@
       GameAudio.setFear(0);
     }
 
+    // --- звук починки щита ---
+    if (G.repairing > 0.01 && !G.ended) {
+      G.sparkTimer = (G.sparkTimer || 0) - dt;
+      if (G.sparkTimer <= 0) {
+        if (GameAudio.ready) GameAudio.spark();
+        G.sparkTimer = 0.45;
+      }
+    }
+
     // --- скримеры ---
     if (!G.ended) updateScares(dt);
 
@@ -529,6 +585,8 @@
 
     // --- HUD ---
     UI.setTimer(G.timer);
+    UI.setObjective(G.fuses, G.exitOpen, G.role);
+    UI.setRepair(G.repairing);
     UI.setStamina(G.stamina, G.staminaMax, G.role === 'hunter');
     UI.setFreeze(G.freeze, G.role);
     if (G.ended) UI.setInteractHint(null);
@@ -548,6 +606,9 @@
       me: { x: G.me.x, y: G.me.y, angle: G.me.angle, moving: G.me.moving, sprint: G.me.sprint, hidden: G.hidden },
       foe: foeView,
       footprints: fps,
+      fuses: G.fuses,
+      exit: G.exit,
+      exitOpen: G.exitOpen,
       spotFlash: G.spotFlash,
       heart: G.seen ? Math.max(G.heart, 0.55) : G.heart,
       catchActive: G.catchActive,

@@ -507,6 +507,70 @@ const GameAudio = (() => {
     }
   }
 
+  // искра электрощита — короткий треск
+  function spark() {
+    const t = now();
+    const src = noiseSource(0.18);
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass'; f.Q.value = 6;
+    f.frequency.setValueAtTime(2600 + Math.random() * 2200, t);
+    f.frequency.exponentialRampToValueAtTime(900, t + 0.15);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.11, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(t);
+  }
+
+  // щит включён — по проводам пошло напряжение, лампы разгораются
+  function powerOn() {
+    const t = now();
+    // нарастающий гул трансформатора
+    for (const [fr, vol] of [[50, 0.10], [100, 0.06], [150, 0.03]]) {
+      const o = ctx.createOscillator();
+      o.type = 'sine'; o.frequency.value = fr;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.25);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 2.2);
+      o.connect(g); g.connect(master);
+      o.start(t); o.stop(t + 2.3);
+    }
+    // щелчок реле и вспышка ламп
+    for (let i = 0; i < 3; i++) {
+      const tt = t + i * 0.13;
+      const src = noiseSource(0.09);
+      const f = ctx.createBiquadFilter();
+      f.type = 'bandpass'; f.frequency.value = 1400; f.Q.value = 3;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.16, tt);
+      g.gain.exponentialRampToValueAtTime(0.0001, tt + 0.09);
+      src.connect(f); f.connect(g); g.connect(master);
+      src.start(tt);
+    }
+  }
+
+  // выход открыт — тревожная сирена лечебницы
+  function alarm() {
+    const t = now();
+    for (let i = 0; i < 3; i++) {
+      const tt = t + i * 0.85;
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.setValueAtTime(420, tt);
+      o.frequency.linearRampToValueAtTime(640, tt + 0.35);
+      o.frequency.linearRampToValueAtTime(420, tt + 0.7);
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass'; f.frequency.value = 1100;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, tt);
+      g.gain.exponentialRampToValueAtTime(0.07, tt + 0.08);
+      g.gain.exponentialRampToValueAtTime(0.0001, tt + 0.78);
+      o.connect(f); f.connect(g); g.connect(master);
+      o.start(tt); o.stop(tt + 0.8);
+    }
+  }
+
   // короткий «штынг» для скримера-тени
   function sting() {
     const t = now();
@@ -575,7 +639,7 @@ const GameAudio = (() => {
     init, unlock, startAmbient, stopAmbient,
     setHeartbeat, setBreath, setDread, setFear, growl,
     doorSlam, childLaugh, whisper, roar, scream, sting, thunder, footstep, closetCreak,
-    swell, ratSqueak,
+    swell, ratSqueak, spark, powerOn, alarm,
     get ready() { return unlocked; },
   };
 })();

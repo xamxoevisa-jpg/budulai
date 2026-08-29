@@ -178,6 +178,24 @@ function updateHunter(game, bot, foe, st, dt) {
     return;
   }
 
+  // 2.5) Следов нет — идём караулить недочиненные щиты: там она появится
+  {
+    const undone = (game.fuses || []).filter(f => !f.done);
+    if (undone.length > 0 && (st.goalKind === 'patrol' || st.goalKind === 'idle')) {
+      const target = undone.reduce((a, b) =>
+        Math.hypot(b.x - bot.x, b.y - bot.y) < Math.hypot(a.x - bot.x, a.y - bot.y) ? b : a);
+      if (Math.hypot(target.x - bot.x, target.y - bot.y) > 70) {
+        setGoal(game, bot, st, [Math.floor(target.x / TILE), Math.floor(target.y / TILE)], 'guard');
+        steer(game, bot, st, false);
+        return;
+      }
+    }
+    if (st.goalKind === 'guard') {
+      if (steer(game, bot, st, false)) st.goalKind = 'patrol';
+      return;
+    }
+  }
+
   // 3) след оборвался — проверить укрытия поблизости
   if (st.goalKind === 'cold' || st.goalKind === 'tospot') {
     // ближайшее укрытие в радиусе 6 тайлов от места обрыва
@@ -229,6 +247,39 @@ function updateSurvivor(game, bot, foe, st, dt) {
       setGoal(game, bot, st, null, 'idle');
     }
     return;
+  }
+
+  // 0) ЦЕЛЬ РАУНДА. Если Монстра рядом нет — чиним щиты, потом к выходу.
+  const fuses = game.fuses || [];
+  const undone = fuses.filter(f => !f.done);
+  // Выход открыт — рвём к нему ВСЕГДА, даже под преследованием: это
+  // единственный способ выиграть раунд. Путь перепрокладываем регулярно.
+  if (game.exitOpen) {
+    const ex = game.map.exit;
+    if (st.goalKind !== 'toexit' || st.repath <= 0 || !st.path) {
+      setGoal(game, bot, st, [Math.floor(ex.x / TILE), Math.floor(ex.y / TILE)], 'toexit');
+      st.repath = 1.0;
+    }
+    steer(game, bot, st, bot.stamina > 15);
+    return;
+  }
+  if (dist > 430) {
+    if (undone.length > 0) {
+      // ближайший невключённый щит
+      const target = undone.reduce((a, b) =>
+        Math.hypot(b.x - bot.x, b.y - bot.y) < Math.hypot(a.x - bot.x, a.y - bot.y) ? b : a);
+      const d = Math.hypot(target.x - bot.x, target.y - bot.y);
+      if (d < 40) {         // стоим у щита — починка идёт сама
+        bot.input.dx = 0; bot.input.dy = 0;
+        return;
+      }
+      if (st.goalKind !== 'tofuse' || st.repath <= 0) {
+        setGoal(game, bot, st, [Math.floor(target.x / TILE), Math.floor(target.y / TILE)], 'tofuse');
+        st.repath = 1.2;
+      }
+      steer(game, bot, st, false);
+      return;
+    }
   }
 
   // 1) Монстр близко — убегать (сердцебиение подсказывает)

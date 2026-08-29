@@ -58,6 +58,8 @@ class Client {
   }
 }
 
+function hunterSnapHasFuses(c) { return !!(c.snap && Array.isArray(c.snap.fu) && c.snap.fu.length === 3); }
+
 // --- поиск пути по карте (BFS) ---
 function bfsPath(map, from, to) {
   const key = (x, y) => x + ',' + y;
@@ -144,6 +146,8 @@ async function main() {
   assert(A.roundStart.role !== B.roundStart.role, 'роли разные');
   assert(A.roundStart.map && A.roundStart.map.grid.length === A.roundStart.map.H, 'карта пришла');
   assert(A.roundStart.map.hideSpots.length >= 4, 'есть укрытия');
+  assert(A.roundStart.map.fuses.length === 3, 'на карте три щита');
+  assert(A.roundStart.map.exit, 'на карте есть выход');
 
   let hunter = A.roundStart.role === 'hunter' ? A : B;
   let survivor = hunter === A ? B : A;
@@ -152,6 +156,7 @@ async function main() {
   console.log('\n== РАУНД 1: погоня и поимка ==');
   await survivor.wait(c => c.snap, 5000, 'первый снапшот');
   await hunter.wait(c => c.snap, 5000, 'первый снапшот охотника');
+  assert(hunterSnapHasFuses(survivor), 'состояние щитов приходит в снапшотах');
   assert(survivor.snap.foe && typeof survivor.snap.foe.x === 'number', 'Выживший видит позицию Монстра');
   assert(!hunter.snap.foe, 'Монстр не видит Выжившего через всю карту');
 
@@ -205,15 +210,16 @@ async function main() {
 
   console.log('\n== РАУНД 3: побег по таймеру и конец матча ==');
   await A.wait(c => c.roundStart && c.roundStart.round === 3, 10000, 'раунд 3');
-  // никто не двигается — Выживший должен дожить до конца (25 с)
+  // никто не двигается: щиты не включены — Жертва проваливает задание
   await A.wait(c => c.roundEnds.length >= 3, 40000, 'таймер раунда истёк');
   const re3 = A.roundEnds[2];
-  assert(re3.stats.result === 'escaped', 'Выживший сбежал по таймеру');
-  const r3SurvSlot = 1 - re3.stats.hunterSlot;
-  assert(re3.stats.score[r3SurvSlot] === 2, 'очко Выжившему, счёт 2');
+  assert(re3.stats.result === 'timeout', 'время вышло: Жертва не подала питание');
+  assert(re3.stats.fuses === 0, 'щиты остались выключенными');
+  const r3HunterSlot = re3.stats.hunterSlot;
+  assert(re3.stats.score[r3HunterSlot] === 2, 'очко Монстру, счёт 2');
   assert(re3.stats.matchOver === true, 'матч окончен');
   await A.wait(c => c.gameOver, 8000, 'gameOver');
-  assert(A.gameOver.winner === r3SurvSlot, 'победитель верный');
+  assert(A.gameOver.winner === r3HunterSlot, 'победитель верный');
 
   console.log('\n== ПЕРЕПОДКЛЮЧЕНИЕ ==');
   A.send({ type: 'ready', ready: true });

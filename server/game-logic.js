@@ -24,10 +24,14 @@ const CONST = {
   STAMINA_REGEN: 16,         // восстановление в секунду
   STAMINA_REGEN_DELAY: 1.2,  // задержка перед восстановлением, с
   CATCH_RADIUS: 30,          // дистанция поимки, px
+  FUSE_TIME: 4.0,            // сколько секунд стоять у щита, чтобы включить
+  FUSE_RADIUS: 46,           // радиус, в котором идёт починка, px
+  FUSE_NOISE: 1.6,           // как часто щит выдаёт Монстра шумом, с
+  EXIT_RADIUS: 52,           // радиус выхода, px
   HUNTER_SIGHT: 430,         // как далеко Монстр видит Жертву глазами, px
                              // (сквозь стены не видит — проверяется луч)
   // env-переопределения — только для автотестов
-  ROUND_TIME: +process.env.CHERN_ROUND_TIME || 180, // длительность раунда, с
+  ROUND_TIME: +process.env.CHERN_ROUND_TIME || 240, // длительность раунда, с
   FREEZE_TIME: process.env.CHERN_FREEZE != null ? +process.env.CHERN_FREEZE : 10, // заморозка Монстра, с
   WIN_SCORE: +process.env.CHERN_WIN_SCORE || 5,     // очков до победы в матче
   FOOTPRINT_INTERVAL: 0.33,  // интервал следов при движении, с
@@ -150,6 +154,10 @@ class Game {
     this.round++;
     this.map = generateMap((Date.now() ^ (this.round * 7919)) >>> 0);
     this.footprints = [];
+    // цель раунда: включить все щиты и уйти через выход
+    this.fuses = this.map.fuses.map(f => ({ ...f, progress: 0, done: false }));
+    this.exitOpen = false;
+    this.fuseNoiseTimer = 0;
     if (this.botSlot != null) this.botState = Bot.freshState(); // новая карта — новые планы
 
     this.phase = PHASE.FREEZE;
@@ -185,6 +193,7 @@ class Game {
           grid: this.map.grid, rooms: this.map.rooms,
           props: this.map.props, hideSpots: this.map.hideSpots,
           childrenCenter: this.map.childrenCenter,
+          fuses: this.map.fuses, exit: this.map.exit,
         },
         names: [this.players[0].name, this.players[1].name],
         hunterSlot: this.hunterSlot,
@@ -192,6 +201,9 @@ class Game {
           staminaMax: CONST.STAMINA_MAX,
           footprintTTL: CONST.FOOTPRINT_TTL,
           interactRadius: CONST.INTERACT_RADIUS,
+          fuseTime: CONST.FUSE_TIME,
+          fuseRadius: CONST.FUSE_RADIUS,
+          exitRadius: CONST.EXIT_RADIUS,
         },
       });
     }
@@ -398,6 +410,44 @@ class Game {
       hunter.moving = false;
     }
 
+    // --- ЦЕЛЬ: щиты и выход ---
+    if (this.phase === PHASE.PLAY && survivor.hiddenIn < 0) {
+      let repairing = null;
+      for (const f of this.fuses) {
+        if (f.done) continue;
+        if (Math.hypot(f.x - survivor.x, f.y - survivor.y) > CONST.FUSE_RADIUS) continue;
+        repairing = f;
+        f.progress = Math.min(CONST.FUSE_TIME, f.progress + dt);
+        if (f.progress >= CONST.FUSE_TIME) {
+          f.done = true;
+          // свет загорается в этом крыле — карта меняется на глазах
+          this.broadcast({ type: 'fuseDone', id: f.id, room: f.room, x: f.x, y: f.y,
+            left: this.fuses.filter(x => !x.done).length });
+          if (this.fuses.every(x => x.done)) {
+            this.exitOpen = true;
+            this.broadcast({ type: 'exitOpen', x: this.map.exit.x, y: this.map.exit.y });
+          }
+        }
+        break;
+      }
+      // щит искрит и гудит — Монстр слышит, где чинят
+      if (repairing) {
+        this.fuseNoiseTimer -= dt;
+        if (this.fuseNoiseTimer <= 0) {
+          this.fuseNoiseTimer = CONST.FUSE_NOISE;
+          this.sendTo(this.hunterSlot, { type: 'noise', x: repairing.x, y: repairing.y });
+        }
+      } else {
+        this.fuseNoiseTimer = 0;
+      }
+
+      // добрался до открытого выхода — сбежал
+      if (this.exitOpen &&
+        Math.hypot(this.map.exit.x - survivor.x, this.map.exit.y - survivor.y) < CONST.EXIT_RADIUS) {
+        this.survivorEscaped();
+      }
+    }
+
     // история позиций Выжившего для лаг-компенсации
     survivor.history.push({ t: this.now, x: survivor.x, y: survivor.y, hidden: survivor.hiddenIn >= 0 });
     const cutoff = this.now - CONST.HISTORY_MS / 1000;
@@ -422,7 +472,12 @@ class Game {
     // --- таймер раунда ---
     if (this.phase === PHASE.PLAY) {
       this.roundTimer -= dt;
-      if (this.roundTimer <= 0) this.survivorEscaped();
+      // время вышло — Жертва не справилась. Так пассивное отсиживание
+      // перестаёт быть выигрышной стратегией.
+      if (this.roundTimer <= 0) {
+        this.score[this.hunterSlot]++;
+        this.endRound({ winnerSlot: this.hunterSlot, result: 'timeout' });
+      }
     }
   }
 
@@ -472,6 +527,8 @@ class Game {
       timeLeft: Math.max(0, this.roundTimer),
       distance: Math.round(survivor.distanceWalked / TILE), // «метров» пройдено
       hides: survivor.hideCount,
+      fuses: (this.fuses || []).filter(f => f.done).length,
+      fusesTotal: (this.fuses || []).length,
       names: [this.players[0].name, this.players[1].name],
       matchOver: this.score[0] >= CONST.WIN_SCORE || this.score[1] >= CONST.WIN_SCORE,
     };
@@ -499,6 +556,12 @@ class Game {
         st: Math.round(p.stamina),
         hid: p.hiddenIn,
       },
+      // щиты: доля починки и признак «включён» — оба игрока видят прогресс
+      fu: (this.fuses || []).map(f => ({
+        d: f.done ? 1 : 0,
+        p: +(f.progress / CONST.FUSE_TIME).toFixed(2),
+      })),
+      xo: this.exitOpen ? 1 : 0,
     };
 
     if (isHunter) {

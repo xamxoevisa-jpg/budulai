@@ -290,6 +290,32 @@ function generateMap(seed) {
     }
   }
 
+  // --- ЩИТЫ: три электрощита в разных комнатах, подальше друг от друга.
+  // Включив все три, Выживший подаёт питание на выход. Это и есть его цель:
+  // не «бегать три минуты», а решаться подходить и стоять под ударом.
+  const fuses = [];
+  const fuseRooms = placedRooms
+    .filter(r => r.type !== ROOM.CORRIDOR)
+    .sort(() => rand() - 0.5);
+  for (const room of fuseRooms) {
+    if (fuses.length >= 3) break;
+    const c = freeCell(room, 1);
+    if (!c) continue;
+    const p = world(c);
+    // держим щиты врозь, чтобы нельзя было чинить всё в одном углу
+    if (fuses.some(f => Math.hypot(f.x - p.x, f.y - p.y) < TILE * 12)) continue;
+    fuses.push({ id: fuses.length, x: p.x, y: p.y, room: { x: room.x, y: room.y, w: room.w, h: room.h } });
+  }
+  // если карта вышла тесной — добираем без ограничения на дистанцию
+  for (const room of fuseRooms) {
+    if (fuses.length >= 3) break;
+    const c = freeCell(room, 1);
+    if (!c) continue;
+    const p = world(c);
+    if (fuses.some(f => f.x === p.x && f.y === p.y)) continue;
+    fuses.push({ id: fuses.length, x: p.x, y: p.y, room: { x: room.x, y: room.y, w: room.w, h: room.h } });
+  }
+
   // --- точки спавна: по разные концы главного коридора ---
   const spawnA = { x: 4.5 * TILE, y: (mainY + 1.5) * TILE };
   const spawnB = { x: (W - 4.5) * TILE, y: (mainY + 1.5) * TILE };
@@ -297,8 +323,25 @@ function generateMap(seed) {
   // детское крыло — для триггера смеха
   const childrenRoom = placedRooms.find(r => r.type === ROOM.CHILDREN);
 
+  // ВЫХОД — пожарная дверь в торце бокового коридора, максимально далеко
+  // от спавна Монстра: иначе он просто стоял бы на выходе с первой секунды.
+  // Открывается, только когда включены все щиты.
+  let exit = { x: (W / 2) * TILE, y: (mainY + 1.5) * TILE };
+  {
+    let best = null, bestD = -1;
+    for (const bx of branches) {
+      for (const ty of [3, H - 5]) {           // торцы веток: верх и низ карты
+        if (!grid[ty] || !isWalkableTile(grid[ty][bx])) continue;
+        const wx = (bx + 0.5) * TILE, wy = (ty + 0.5) * TILE;
+        const d = Math.hypot(wx - spawnA.x, wy - spawnA.y);
+        if (d > bestD) { bestD = d; best = { x: wx, y: wy }; }
+      }
+    }
+    if (best) exit = best;
+  }
+
   return {
-    seed, W, H, TILE, grid, rooms, props, hideSpots,
+    seed, W, H, TILE, grid, rooms, props, hideSpots, fuses, exit,
     spawnA, spawnB,
     childrenCenter: childrenRoom
       ? { x: (childrenRoom.x + childrenRoom.w / 2) * TILE, y: (childrenRoom.y + childrenRoom.h / 2) * TILE }
