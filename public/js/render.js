@@ -1520,27 +1520,65 @@ const Render = (() => {
       g.closePath();
       g.fill();
 
-      // фото-лицо пользователя (если положил файл в public/monster)
-      if (monsterFaceImg && monsterFaceImg.complete && monsterFaceImg.naturalWidth) {
+      // фото-лицо пользователя (если положил файл в public/monster).
+      // Когда фото есть, процедурные черты НЕ рисуем: они полностью
+      // перекрыли бы снимок. Вместо них — мертвенная обработка самого
+      // фото и «неправильные» детали по краям.
+      const hasFace = !!(monsterFaceImg && monsterFaceImg.complete && monsterFaceImg.naturalWidth);
+      if (hasFace) {
         g.save();
         g.beginPath();
-        g.ellipse(0, 0, 34, 52, 0, 0, 7);
+        g.ellipse(0, 0, 35, 53, 0, 0, 7);
         g.clip();
         const iw = monsterFaceImg.naturalWidth, ih = monsterFaceImg.naturalHeight;
-        const sc = Math.max(68 / iw, 104 / ih) * 1.12;
-        g.globalAlpha = 0.92;
-        g.drawImage(monsterFaceImg, -iw * sc / 2, -ih * sc / 2 - 4, iw * sc, ih * sc);
-        // обесцветить под мертвенный тон
+        // cover-вписывание в овал головы
+        const sc = Math.max(70 / iw, 106 / ih) * 1.18;
+        g.drawImage(monsterFaceImg, -iw * sc / 2, -ih * sc / 2 - 6, iw * sc, ih * sc);
+        // обескровить: снять цвет
         g.globalCompositeOperation = 'saturation';
         g.fillStyle = '#808080';
         g.fillRect(-40, -60, 80, 120);
+        // трупный сине-серый тон и провал яркости
         g.globalCompositeOperation = 'multiply';
-        g.fillStyle = 'rgba(168,160,148,0.75)';
+        g.fillStyle = 'rgba(214,212,204,0.55)';
         g.fillRect(-40, -60, 80, 120);
+        // холодный трупный подтон
+        g.globalCompositeOperation = 'overlay';
+        g.fillStyle = 'rgba(70,74,86,0.35)';
+        g.fillRect(-40, -60, 80, 120);
+        // виньетка по краю черепа: лицо тонет в тени
+        g.globalCompositeOperation = 'source-over';
+        const vgn = g.createRadialGradient(0, -4, 12, 0, 0, 46);
+        vgn.addColorStop(0, 'rgba(0,0,0,0)');
+        vgn.addColorStop(0.66, 'rgba(6,5,5,0.18)');
+        vgn.addColorStop(1, 'rgba(4,3,3,0.8)');
+        g.fillStyle = vgn;
+        g.fillRect(-40, -60, 80, 120);
+        // гниль пятнами прямо по лицу
+        for (let i = 0; i < 26; i++) {
+          g.fillStyle = Math.random() < 0.6
+            ? `rgba(12,10,9,${(0.06 + Math.random() * 0.2).toFixed(2)})`
+            : `rgba(84,60,44,${(0.05 + Math.random() * 0.16).toFixed(2)})`;
+          g.beginPath();
+          g.ellipse((Math.random() - 0.5) * 66, (Math.random() - 0.5) * 96,
+            2 + Math.random() * 8, 2 + Math.random() * 6, Math.random() * 3, 0, 7);
+          g.fill();
+        }
         g.restore();
-        g.globalAlpha = 1;
+        // швы по краю лица — будто оно пришито к черепу
+        g.strokeStyle = 'rgba(46,28,22,0.75)';
+        g.lineWidth = 1.5;
+        for (let i = 0; i < 22; i++) {
+          const a = i / 22 * Math.PI * 2;
+          const ex = Math.cos(a) * 35, ey = Math.sin(a) * 53;
+          g.beginPath();
+          g.moveTo(ex * 0.9, ey * 0.9);
+          g.lineTo(ex * 1.06, ey * 1.06);
+          g.stroke();
+        }
       }
 
+      if (!hasFace) {
       // надбровные дуги: тень сверху, блик по кромке
       g.fillStyle = 'rgba(14,11,10,0.55)';
       g.beginPath();
@@ -1639,11 +1677,13 @@ const Render = (() => {
           g.stroke();
         }
       }
+      } // конец процедурных черт (рисуются, только если фото не задано)
       // редкие мокрые пряди волос
       g.strokeStyle = 'rgba(26,22,19,0.9)';
       g.lineCap = 'round';
-      for (let i = 0; i < 14; i++) {
-        const a = -2.5 + i * 0.22;
+      const hairN = hasFace ? 5 : 14;
+      for (let i = 0; i < hairN; i++) {
+        const a = -2.5 + i * (hasFace ? 0.62 : 0.22);
         const rx = Math.cos(a) * 33, ry = -30 + Math.sin(a) * 20;
         g.lineWidth = 1.4 + (i % 3) * 0.9;
         g.beginPath();
