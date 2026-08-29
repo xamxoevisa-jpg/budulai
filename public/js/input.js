@@ -1,60 +1,70 @@
 // ============================================================
-// input.js — ввод: клавиатура (WASD/стрелки, Shift, E),
-// мышь (поворот фонарика) и сенсорное управление для iPhone:
-// джойстик появляется в точке касания слева,
-// кнопки спринта и взаимодействия — справа.
+// input.js — управление видом от первого лица.
+// Десктоп: W/S — вперёд/назад, A/D — шаг вбок, ←/→ — поворот,
+//          мышь (клик по экрану включает захват) — поворот головы,
+//          Shift — спринт, E/пробел — взаимодействие.
+// Телефон: палец слева — джойстик ходьбы (вверх = вперёд),
+//          свайп по правой половине — поворот головы,
+//          кнопки «БЕГ» и «✚» справа.
+// Слушатели касаний висят ТОЛЬКО на игровом канвасе — экраны
+// входа/лобби получают тапы нативно (важно для iOS).
 // ============================================================
 
 'use strict';
 
 const Input = (() => {
   const state = {
-    dx: 0, dy: 0,        // вектор движения (-1..1)
+    moveX: 0,            // шаг вбок: -1 влево .. +1 вправо (относительно взгляда)
+    moveY: 0,            // вперёд/назад: +1 вперёд .. -1 назад
+    turnHeld: 0,         // зажат поворот клавишами: -1/0/+1
+    turnDelta: 0,        // накопленный поворот мышью/свайпом (радианы)
     sprint: false,
-    angle: 0,            // угол фонарика (радианы, мировой)
-    interactPressed: false, // одноразовый флаг
+    interactPressed: false,
     usingTouch: false,
-    mouseAim: false,     // управляет ли мышь фонариком
   };
 
   const keys = {};
-  let mouseX = 0, mouseY = 0;
 
   // --- клавиатура ---
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
     keys[e.code] = true;
     if (e.code === 'KeyE' || e.code === 'Space') state.interactPressed = true;
-    // не даём странице скроллиться стрелками
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
   });
   window.addEventListener('keyup', (e) => { keys[e.code] = false; });
   window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
-  // --- мышь: поворот фонарика ---
-  window.addEventListener('mousemove', (e) => {
-    mouseX = e.clientX; mouseY = e.clientY;
-    if (!state.usingTouch) state.mouseAim = true;
-  });
+  // --- мышь: поворот головы через Pointer Lock ---
+  function initMouse(canvas) {
+    canvas.addEventListener('click', () => {
+      if (state.usingTouch) return;
+      if (document.pointerLockElement !== canvas && canvas.requestPointerLock) {
+        canvas.requestPointerLock();
+      }
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (document.pointerLockElement === canvas) {
+        state.turnDelta += e.movementX * 0.0021;
+      }
+    });
+  }
 
   // --- сенсорное управление ---
-  const touchUI = () => document.getElementById('touchUI');
   const joyBase = () => document.getElementById('joyBase');
   const joyKnob = () => document.getElementById('joyKnob');
 
   let joyTouchId = null;
-  let joyCx = 0, joyCy = 0;        // центр джойстика
-  const JOY_R = 52;                 // радиус хода ручки
+  let joyCx = 0, joyCy = 0;
+  const JOY_R = 52;
+  let lookTouchId = null;
+  let lookLastX = 0;
 
   function onTouchStart(e) {
     state.usingTouch = true;
-    state.mouseAim = false;
     for (const t of e.changedTouches) {
-      const el = document.elementFromPoint(t.clientX, t.clientY);
-      // кнопки обрабатываются своими слушателями — пропускаем
-      if (el && el.classList && el.classList.contains('touch-btn')) continue;
-      // джойстик: только левая половина экрана и если ещё не захвачен
-      if (joyTouchId === null && t.clientX < window.innerWidth * 0.55) {
+      if (joyTouchId === null && t.clientX < window.innerWidth * 0.5) {
+        // левая половина — джойстик ходьбы
         joyTouchId = t.identifier;
         joyCx = t.clientX; joyCy = t.clientY;
         const base = joyBase();
@@ -62,6 +72,10 @@ const Input = (() => {
         base.style.top = joyCy + 'px';
         base.classList.remove('hidden');
         moveKnob(0, 0);
+      } else if (lookTouchId === null && t.clientX >= window.innerWidth * 0.5) {
+        // правая половина — поворот головы свайпом
+        lookTouchId = t.identifier;
+        lookLastX = t.clientX;
       }
     }
     if (e.cancelable) e.preventDefault();
@@ -74,12 +88,14 @@ const Input = (() => {
         const len = Math.hypot(dx, dy);
         if (len > JOY_R) { dx = dx / len * JOY_R; dy = dy / len * JOY_R; }
         moveKnob(dx, dy);
-        // мёртвая зона 12px
-        if (len < 12) { state.dx = 0; state.dy = 0; }
+        if (len < 12) { state.moveX = 0; state.moveY = 0; }
         else {
-          state.dx = dx / JOY_R; state.dy = dy / JOY_R;
-          state.angle = Math.atan2(dy, dx); // фонарик — по направлению движения
+          state.moveX = dx / JOY_R;        // вбок
+          state.moveY = -dy / JOY_R;       // вверх = вперёд
         }
+      } else if (t.identifier === lookTouchId) {
+        state.turnDelta += (t.clientX - lookLastX) * 0.0075;
+        lookLastX = t.clientX;
       }
     }
     if (e.cancelable) e.preventDefault();
@@ -89,8 +105,10 @@ const Input = (() => {
     for (const t of e.changedTouches) {
       if (t.identifier === joyTouchId) {
         joyTouchId = null;
-        state.dx = 0; state.dy = 0;
+        state.moveX = 0; state.moveY = 0;
         joyBase().classList.add('hidden');
+      } else if (t.identifier === lookTouchId) {
+        lookTouchId = null;
       }
     }
     if (e.cancelable) e.preventDefault();
@@ -101,16 +119,14 @@ const Input = (() => {
   }
 
   function initTouch() {
-    // ВАЖНО: слушаем касания только на игровом канвасе, а не на документе.
-    // Экраны входа/лобби лежат ПОВЕРХ канваса — их поля и кнопки получают
-    // тапы нативно (иначе preventDefault глушил бы клавиатуру и клики на iOS)
+    // касания — только на игровом канвасе: оверлеи входа/лобби
+    // получают тапы нативно (iOS-клавиатура, кнопки)
     const cnv = document.getElementById('game');
     cnv.addEventListener('touchstart', onTouchStart, { passive: false });
     cnv.addEventListener('touchmove', onTouchMove, { passive: false });
     cnv.addEventListener('touchend', onTouchEnd, { passive: false });
     cnv.addEventListener('touchcancel', onTouchEnd, { passive: false });
 
-    // кнопки
     const bindBtn = (id, down, up) => {
       const el = document.getElementById(id);
       el.addEventListener('touchstart', (e) => { el.classList.add('pressed'); down(); e.preventDefault(); e.stopPropagation(); }, { passive: false });
@@ -118,56 +134,53 @@ const Input = (() => {
     };
     bindBtn('btnSprint', () => { state.sprint = true; }, () => { state.sprint = false; });
     bindBtn('btnAct', () => { state.interactPressed = true; });
+
+    initMouse(cnv);
   }
 
-  // блокировка жестов iOS: пинч-зум и дабл-клик.
-  // Двойной тап давит CSS touch-action на body; глобальный preventDefault
-  // на touchend НЕЛЬЗЯ — он ломает нажатия кнопок и фокус полей на iPhone
+  // пинч-зум и дабл-клик глушим; тапы по кнопкам не трогаем
   document.addEventListener('gesturestart', (e) => e.preventDefault());
   document.addEventListener('dblclick', (e) => e.preventDefault());
 
-  // --- опрос состояния (вызывается из main каждый кадр) ---
-  // cam: {x, y} + canvas — чтобы перевести мышь в мировой угол
-  function poll(camera, myPos) {
+  // --- опрос (каждый кадр из main) ---
+  function poll() {
     if (!state.usingTouch) {
-      let dx = 0, dy = 0;
-      if (keys['KeyW'] || keys['ArrowUp']) dy -= 1;
-      if (keys['KeyS'] || keys['ArrowDown']) dy += 1;
-      if (keys['KeyA'] || keys['ArrowLeft']) dx -= 1;
-      if (keys['KeyD'] || keys['ArrowRight']) dx += 1;
-      const len = Math.hypot(dx, dy);
-      if (len > 0) { dx /= len; dy /= len; }
-      state.dx = dx; state.dy = dy;
+      let mx = 0, my = 0, turn = 0;
+      if (keys['KeyW'] || keys['ArrowUp']) my += 1;
+      if (keys['KeyS'] || keys['ArrowDown']) my -= 1;
+      if (keys['KeyA']) mx -= 1;
+      if (keys['KeyD']) mx += 1;
+      if (keys['ArrowLeft']) turn -= 1;
+      if (keys['ArrowRight']) turn += 1;
+      const len = Math.hypot(mx, my);
+      if (len > 1) { mx /= len; my /= len; }
+      state.moveX = mx; state.moveY = my;
+      state.turnHeld = turn;
       state.sprint = !!(keys['ShiftLeft'] || keys['ShiftRight']);
-
-      // фонарик: мышь приоритетнее, иначе — направление движения
-      if (state.mouseAim && camera && myPos) {
-        const wx = camera.x + (mouseX - window.innerWidth / 2);
-        const wy = camera.y + (mouseY - window.innerHeight / 2);
-        state.angle = Math.atan2(wy - myPos.y, wx - myPos.x);
-      } else if (len > 0) {
-        state.angle = Math.atan2(dy, dx);
-      }
-      // если игрок начал двигаться клавишами — движение задаёт угол,
-      // пока мышь не шевельнётся снова
-      if (len > 0 && !state.mouseAim) state.angle = Math.atan2(dy, dx);
+    } else {
+      state.turnHeld = 0;
     }
     return state;
   }
 
-  // одноразовое считывание кнопки взаимодействия
+  // одноразовые считывания
   function takeInteract() {
     const v = state.interactPressed;
     state.interactPressed = false;
     return v;
   }
+  function takeTurnDelta() {
+    const v = state.turnDelta;
+    state.turnDelta = 0;
+    return v;
+  }
 
   function showTouchUI() {
     if (state.usingTouch || 'ontouchstart' in window) {
-      touchUI().classList.remove('hidden');
+      document.getElementById('touchUI').classList.remove('hidden');
     }
   }
-  function hideTouchUI() { touchUI().classList.add('hidden'); }
+  function hideTouchUI() { document.getElementById('touchUI').classList.add('hidden'); }
 
-  return { state, poll, takeInteract, initTouch, showTouchUI, hideTouchUI };
+  return { state, poll, takeInteract, takeTurnDelta, initTouch, showTouchUI, hideTouchUI };
 })();

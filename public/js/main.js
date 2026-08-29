@@ -31,6 +31,8 @@
     footprintTTL: 5,
     interactRadius: 52,
     me: { x: 0, y: 0, angle: 0, moving: false },
+    facing: 0,                      // направление взгляда (радианы)
+    _faceInit: false,               // взгляд выставлен при старте раунда
     serverMe: { x: 0, y: 0 },      // последняя авторитарная позиция
     foeBuf: [],                     // буфер снапшотов соперника
     footprints: [],                 // {x,y,born}
@@ -162,10 +164,17 @@
     G.hidden = msg.you.hid >= 0;
     if (G.hidden && !wasHidden) { G.me.x = msg.you.x; G.me.y = msg.you.y; }
 
-    // первый снапшот раунда: жёстко ставим позицию и камеру
+    // первый снапшот раунда: жёстко ставим позицию, камеру и взгляд
     if (G.foeBuf.length === 0 && !G._gotFirstSnap) {
       G.me.x = msg.you.x; G.me.y = msg.you.y;
       Render.snapCamera(msg.you.x, msg.you.y);
+      // смотрим в сторону центра лечебницы — вдоль коридора
+      if (G.map) {
+        G.facing = Math.atan2(
+          (G.map.H / 2) * G.map.TILE - msg.you.y,
+          (G.map.W / 2) * G.map.TILE - msg.you.x
+        );
+      }
       G._gotFirstSnap = true;
     }
 
@@ -338,7 +347,7 @@
         Render.trigger('glitch');
         if (GameAudio.ready) GameAudio.swell();
       } else if (roll < 0.72) {
-        Render.trigger('rat');
+        Render.trigger('rat', { angle: G.facing });
         if (GameAudio.ready) GameAudio.ratSqueak((Math.random() - 0.5) * 1.6);
       } else if (roll < 0.86) {
         if (GameAudio.ready) GameAudio.whisper();
@@ -350,6 +359,18 @@
     }
   }
 
+  // ============ ЛОКАЛЬНОЕ ДВИЖЕНИЕ -> МИРОВОЕ ============
+  // джойстик/клавиши дают движение относительно взгляда;
+  // сервер ждёт мировой вектор
+  function worldMove(inp) {
+    const f = G.facing;
+    let dx = Math.cos(f) * inp.moveY + Math.cos(f + Math.PI / 2) * inp.moveX;
+    let dy = Math.sin(f) * inp.moveY + Math.sin(f + Math.PI / 2) * inp.moveX;
+    const l = Math.hypot(dx, dy);
+    if (l > 1) { dx /= l; dy /= l; }
+    return { dx, dy };
+  }
+
   // ============ ОТПРАВКА ВВОДА ============
   // Отдельный таймер (не rAF): в свёрнутой вкладке rAF замирает,
   // а setInterval продолжает работать — ввод не «залипает»
@@ -358,13 +379,13 @@
     const inGame = G.phase === 'play' || G.phase === 'freeze';
     if (!inGame) return;
     const frozen = G.role === 'hunter' && G.phase === 'freeze';
-    const inp = Input.state;
+    const wv = worldMove(Input.state);
     Network.send({
       type: 'input',
-      dx: (frozen || G.hidden || G.ended) ? 0 : inp.dx,
-      dy: (frozen || G.hidden || G.ended) ? 0 : inp.dy,
-      sprint: inp.sprint,
-      angle: inp.angle,
+      dx: (frozen || G.hidden || G.ended) ? 0 : wv.dx,
+      dy: (frozen || G.hidden || G.ended) ? 0 : wv.dy,
+      sprint: Input.state.sprint,
+      angle: G.facing,
     });
   }, 50);
 
@@ -383,34 +404,42 @@
     const frozen = G.role === 'hunter' && G.phase === 'freeze';
 
     // --- ввод ---
-    const inp = Input.poll(Render.cam, G.me);
+    const inp = Input.poll();
     if (Input.takeInteract() && inGame && !G.ended) {
       Network.send({ type: 'interact' });
     }
 
+    // --- поворот головы (мышь/свайп/стрелки) ---
+    G.facing += Input.takeTurnDelta() + inp.turnHeld * 2.6 * dt;
+    if (G.facing > Math.PI) G.facing -= Math.PI * 2;
+    if (G.facing < -Math.PI) G.facing += Math.PI * 2;
+
     // --- локальное предсказание своего движения ---
+    const wv = worldMove(inp);
     if (inGame && !G.hidden && !frozen && !G.ended) {
       let speed = G.role === 'hunter' ? HUNTER_SPEED : SURVIVOR_SPEED;
-      if (G.role === 'survivor' && inp.sprint && G.stamina > 0) speed = SURVIVOR_SPRINT;
+      const sprinting = G.role === 'survivor' && inp.sprint && G.stamina > 0;
+      if (sprinting) speed = SURVIVOR_SPRINT;
       if (tileAtMe() === 5) speed *= RUBBLE_SLOW;
-      const dx = inp.dx * speed * dt, dy = inp.dy * speed * dt;
+      const dx = wv.dx * speed * dt, dy = wv.dy * speed * dt;
       if (dx !== 0) G.me.x = resolveAxis(G.me.x, G.me.y, dx, 0);
       if (dy !== 0) G.me.y = resolveAxis(G.me.x, G.me.y, 0, dy);
-      G.me.moving = (inp.dx !== 0 || inp.dy !== 0);
+      G.me.moving = (inp.moveX !== 0 || inp.moveY !== 0);
+      G.me.sprint = sprinting;
 
       // звук шагов
       if (G.me.moving) {
         G.stepTimer -= dt;
         if (G.stepTimer <= 0) {
-          const sprinting = inp.sprint && G.stamina > 0;
           if (GameAudio.ready) GameAudio.footstep(sprinting);
           G.stepTimer = sprinting ? 0.26 : 0.4;
         }
       }
     } else {
       G.me.moving = false;
+      G.me.sprint = false;
     }
-    G.me.angle = inp.angle;
+    G.me.angle = G.facing;
 
     // --- сглаживание к авторитарной позиции сервера ---
     const errX = G.serverMe.x - G.me.x, errY = G.serverMe.y - G.me.y;
@@ -483,6 +512,9 @@
     UI.setStamina(G.stamina, G.staminaMax, G.role === 'hunter');
     UI.setFreeze(G.freeze, G.role);
     if (G.ended) UI.setInteractHint(null);
+    else if (G.phase === 'freeze' && Input.state.usingTouch) {
+      UI.setInteractHint('палец слева — ходьба · свайп справа — поворот');
+    }
     else if (G.hidden) UI.setInteractHint(Input.state.usingTouch ? '✚ — ВЫБРАТЬСЯ' : 'E — ВЫБРАТЬСЯ ИЗ УКРЫТИЯ');
     else if (nearestSpotDist() < G.interactRadius) {
       UI.setInteractHint(G.role === 'hunter'
@@ -493,7 +525,7 @@
     // --- кадр ---
     Render.drawFrame(dt, {
       role: G.role,
-      me: { x: G.me.x, y: G.me.y, angle: G.me.angle, moving: G.me.moving, hidden: G.hidden },
+      me: { x: G.me.x, y: G.me.y, angle: G.me.angle, moving: G.me.moving, sprint: G.me.sprint, hidden: G.hidden },
       foe: foeView,
       footprints: fps,
       spotFlash: G.spotFlash,
